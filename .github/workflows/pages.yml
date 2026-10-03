@@ -31,6 +31,7 @@ jobs:
           node scripts/check-hydrology.mjs
           node --check dist/flow-worker.js
           node scripts/check-shallow-water.mjs
+          node scripts/check-flow-worker.mjs
           node scripts/check-scene.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

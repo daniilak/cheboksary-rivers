@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {observeFlow,flowFeatures} from '../dist/flow-observations.js';
+import {makeFlowGrid} from '../dist/flow-grid.js';
 import {connectedFlood,sectionHydraulics,seasonalScenario,exposedBuildings} from '../dist/hydrology.js';
 const grid={width:5,height:5};
 const dem=new Float32Array([
@@ -63,20 +65,24 @@ console.log('PASS: actual OSM building topology, raster alignment, river attribu
 
 // Exercise the exact browser exporter without constructing a WebGL scene.
 const viewSource=fs.readFileSync(new URL('../dist/hydrology-view.js',import.meta.url),'utf8').replace(/^import.*$/gm,'').replace('export class HydrologyView','class HydrologyView').replaceAll('import.meta.url',JSON.stringify(new URL('../dist/hydrology-view.js',import.meta.url).href));
-const View=vm.runInNewContext(viewSource+';HydrologyView',{sectionHydraulics});
-const result=connectedFlood(meta,heights,seeds,barriers,data.baseline+3),surfaceMask=bytes('surface-mask.bin');
-const exposure=exposedBuildings(buildings,result),stats={buildingsNearWater:exposure.filter(b=>b.exposed).length};
-const exported=JSON.parse(JSON.stringify(View.prototype.createExport.call({meta,dem:heights,seeds,surfaceMask,flood:result,buildings,exposure,data,state:{depth:8,rise:3,discharge:10000,manning:.03,obstacles:true},stats})));
+const View=vm.runInNewContext(viewSource+';HydrologyView',{flowFeatures});
+const surfaceMask=bytes('surface-mask.bin');
+const grid2d=makeFlowGrid(meta,seeds,{baseline:data.baseline,depth:8,rise:3,discharge:10000,manning:.03},heights,barriers);
+const field={...grid2d,depth:Float32Array.from(grid2d.initialDepth),u:new Float32Array(grid2d.mask.length),v:new Float32Array(grid2d.mask.length),eta:Float32Array.from(grid2d.bed,(z,k)=>z+grid2d.initialDepth[k]),diagnostics:{time:0,relativeBalanceError:0}};
+const {exposure,stats}=observeFlow(field,meta,surfaceMask,buildings);
+const context={meta,buildings,exposure,data,state:{depth:8,rise:3,discharge:10000,manning:.03,obstacles:true},stats,flowField:field};
+const exported=JSON.parse(JSON.stringify(View.prototype.createExport.call(context)));
 assert.equal(exported.type,'FeatureCollection');assert.equal(exported.metadata.parameters.rise,3);
-assert.equal(exported.features.filter(f=>f.properties.kind==='section').length,data.sections.length);
 assert.equal(exported.features.filter(f=>f.properties.kind==='building_contact').length,stats.buildingsNearWater);
-assert.ok(exported.features.some(f=>f.properties.kind==='flood_cell'));
+const cells=exported.features.filter(f=>f.properties.kind.endsWith('_cell'));
+assert.equal(cells.length,field.depth.filter((v,k)=>v>.05&&field.mask[k]).length);
 for(const f of exported.features){if(f.geometry.type==='Polygon')for(const ring of f.geometry.coordinates){assert.deepEqual(ring[0],ring.at(-1));assert.ok(ring.flat().every(Number.isFinite));}}
-console.log('PASS: exported GeoJSON contains closed finite flood cells, building contacts, all 85 sections, parameters and limitations.');
-
-const field={width:2,height:2,bounds:meta.bounds,dx:100,dy:120,mask:Uint8Array.of(1,0,1,0),u:Float32Array.of(.1,0,.2,0),v:Float32Array.of(.2,0,-.1,0),eta:Float32Array.of(64.5,0,64.6,0),diagnostics:{time:3600,relativeBalanceError:1e-14}};
-const withFlow=View.prototype.createExport.call({meta,dem:heights,seeds,surfaceMask,flood:result,buildings,exposure,data,state:{depth:8,rise:3,discharge:10000,manning:.03,obstacles:true},stats,flowField:field});
-assert.equal(withFlow.features.filter(f=>f.properties.kind==='flow2d').length,2);
-assert.equal(withFlow.metadata.flow2d.diagnostics.time,3600);
-assert.ok(withFlow.features.filter(f=>f.properties.kind==='flow2d').every(f=>Number.isFinite(f.properties.speed)));
-console.log('PASS: 2D export preserves finite vectors, component directions, water elevations and balance diagnostics.');
+assert.ok(cells.every(f=>f.properties.waterElevation===data.baseline),'Requested rise must not instantly refill the interior');
+assert.equal(exported.metadata.flow2d.diagnostics.time,0);
+const small={width:2,height:2,bounds:[0,0,2,2],dx:10,dy:10,mask:Uint8Array.of(1,0,1,1),river:Uint8Array.of(1,0,0,0),depth:Float32Array.of(2,0,.5,0),u:Float32Array.of(.1,0,.2,0),v:Float32Array.of(.2,0,-.1,0),eta:Float32Array.of(2,0,.5,0)};
+const observations=observeFlow(small,{width:2,height:2},Uint8Array.of(2,1,1,1),[{contactCells:[2]},{contactCells:[3]}]);
+assert.equal(observations.stats.areaKm2,.0001);assert.equal(observations.stats.volumeM3,50);assert.equal(observations.stats.buildingsNearWater,1);
+assert.equal(observations.exposure[0].depth,.5);assert.equal(observations.exposure[1].exposed,false);
+const smallFeatures=flowFeatures(small);assert.equal(smallFeatures.length,2);assert.equal(smallFeatures[1].properties.depth,observations.exposure[0].depth);
+assert.equal(smallFeatures[1].properties.vSouth,small.v[2]);
+console.log('PASS: map observations and GeoJSON use identical wet cells, depths, vectors, building contacts, elapsed time and boundary budget; requested stage cannot instantly flood the map.');

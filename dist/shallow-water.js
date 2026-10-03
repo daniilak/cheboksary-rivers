@@ -3,15 +3,17 @@
 // Rusanov flux + hydrostatic pressure correction; reflective solid banks.
 const G=9.81, DRY=1e-6;
 export class ShallowWater2D {
-  constructor({width,height,dx,dy,bed,mask,level,inletQ=null,outletLevel=null,roughness=.03}) {
+  constructor({width,height,dx,dy,bed,mask,level,inletQ=null,outletLevel=null,roughness=.03,initialDepth=null,inletMask=null,outletMask=null}) {
     if(![dx,dy,roughness].every(Number.isFinite)||roughness<0||(inletQ!==null&&(!Number.isFinite(inletQ)||inletQ<0))||(outletLevel!==null&&!Number.isFinite(outletLevel)))throw Error('Invalid flow boundary or roughness');
     if(!Number.isInteger(width)||!Number.isInteger(height)||width<2||height<2||dx<=0||dy<=0||bed.length!==width*height||mask.length!==bed.length||!Number.isFinite(level))throw Error('Invalid shallow-water grid');
     Object.assign(this,{width,height,dx,dy,inletQ,outletLevel,roughness});
+    for(const array of [initialDepth,inletMask,outletMask])if(array&&array.length!==bed.length)throw Error("Invalid initial/boundary mask");
+    this.inletMask=inletMask;this.outletMask=outletMask;
     this.bed=Float64Array.from(bed);this.mask=Uint8Array.from(mask);
     this.h=new Float64Array(bed.length);this.hu=new Float64Array(bed.length);this.hv=new Float64Array(bed.length);
     this.dh=new Float64Array(bed.length);this.du=new Float64Array(bed.length);this.dv=new Float64Array(bed.length);
     this.active=[];this.inlets=[];this.time=0;this.boundaryVolume=0;this.roundoffVolume=0;
-    for(let k=0;k<bed.length;k++)if(mask[k]){if(!Number.isFinite(bed[k]))throw Error('Non-finite bed');this.active.push(k);this.h[k]=Math.max(0,level-bed[k]);if(k%width===0)this.inlets.push(k);}
+    for(let k=0;k<bed.length;k++)if(mask[k]){if(!Number.isFinite(bed[k]))throw Error('Non-finite bed');this.active.push(k);this.h[k]=initialDepth?initialDepth[k]:Math.max(0,level-bed[k]);if(!Number.isFinite(this.h[k])||this.h[k]<0)throw Error("Invalid initial depth");if(k%width===0&&(!inletMask||inletMask[k]))this.inlets.push(k);}
     this.initialVolume=this.volume();
   }
   volume(){let v=0;for(const k of this.active)v+=this.h[k]*this.dx*this.dy;return v;}
@@ -33,6 +35,7 @@ export class ShallowWater2D {
     }else if(kind==='outlet'){
       hr=Math.max(0,this.outletLevel-zr); // prescribed downstream stage; extrapolate velocity
     }
+    if(hl===0&&hr===0&&kind!=='inlet')return;
     const crest=Math.max(zl,zr),a=Math.max(0,hl+zl-crest),b=Math.max(0,hr+zr-crest);
     const unL=axis===0?ul:vl,unR=axis===0?ur:vr,utL=axis===0?vl:ul,utR=axis===0?vr:ur;
     const speed=Math.max(Math.abs(unL)+Math.sqrt(G*a),Math.abs(unR)+Math.sqrt(G*b));
@@ -56,9 +59,9 @@ export class ShallowWater2D {
     for(const k of this.active){
       const x=k%w,y=Math.floor(k/w);
       if(x<w-1&&this.mask[k+1])this.face(k,k+1,0,dt);
-      else this.face(k,-1,0,dt,x===w-1&&this.outletLevel!==null?'outlet':'wall');
+      else this.face(k,-1,0,dt,x===w-1&&this.outletLevel!==null&&(!this.outletMask||this.outletMask[k])?'outlet':'wall');
       if(y<h-1&&this.mask[k+w])this.face(k,k+w,1,dt);else this.face(k,-1,1,dt,'wall');
-      if(x===0||!this.mask[k-1])this.face(-1,k,0,dt,x===0&&this.inletQ!==null?'inlet':'wall');
+      if(x===0||!this.mask[k-1])this.face(-1,k,0,dt,x===0&&this.inletQ!==null&&(!this.inletMask||this.inletMask[k])?'inlet':'wall');
       if(y===0||!this.mask[k-w])this.face(-1,k,1,dt,'wall');
     }
     for(const k of this.active){

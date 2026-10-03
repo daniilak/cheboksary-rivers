@@ -92,13 +92,13 @@ function webMCP(){const context=document.modelContext;if(!context?.registerTool)
 function setMode(mode){
   if(recording)return;
   state.mode=mode;state.year=0;state.evolving=false;state.compare=false;
-  hydrology.state.playing=false;hydrology.group.visible=mode==='hydrology';
+  if(mode==='erosion')hydrology.setRunning(false);hydrology.group.visible=mode==='hydrology';
   $('hydroPane').hidden=mode!=='hydrology';$('erosionPane').hidden=mode!=='erosion';
   $('hydroSidebar').hidden=mode!=='hydrology';
   document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',String(b.dataset.mode===mode));});
   $('modelBadge').textContent=mode==='hydrology'?'Сценарная модель · OSM + DSM':'Эскиз размыва · не физический прогноз';
   syncLab();applyEvolution();resize();
-  if(mode==='erosion'){for(const mesh of waterGroup.children)mesh.position.y=0;}else hydrology.update();
+  if(mode==='erosion'){for(const mesh of waterGroup.children){mesh.position.y=0;mesh.visible=true;}}else{hydrology.update();if(hydrology.flowField)hydrology.onLevel(null);}
 }
 async function start(){try{
   const names=['terrain.json','terrain.bin','rivers.json','boundary.json','water.json','surface-mask.bin','buildings.json','building-mask.bin','volga-mask.bin','hydrology.json'];
@@ -107,7 +107,7 @@ async function start(){try{
   evolution=new TerrainEvolution(meta,heights);if(heights.length!==meta.width*meta.height)throw Error('Неполная сетка высот');
   const [w,s,e,n]=meta.bounds;lon0=(w+e)/2;lat0=(s+n)/2;width=(e-w)*111320*Math.cos(lat0*Math.PI/180)*scale;depth=(n-s)*111320*scale;
   initScene();buildTerrain();buildBoundary();buildWater();
-  hydrology=new HydrologyView({world,meta,dem:evolution.base,seeds:volgaMask,barriers:new Uint8Array(responses[7]),surfaceMask,buildings:responses[6],data:hydroData,xy,onFocus:b=>{const coords=b.geometry.coordinates[0];const lon=coords.reduce((a,p)=>a+p[0],0)/coords.length,lat=coords.reduce((a,p)=>a+p[1],0)/coords.length;const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,1.6,.001):v3(.5,1.3,1.4));controls.update();},onLevel:level=>{for(const mesh of waterGroup.children)if(mesh.userData.volga)mesh.position.y=(level-hydroData.baseline)*.012;}});
+  hydrology=new HydrologyView({world,meta,dem:evolution.base,seeds:volgaMask,barriers:new Uint8Array(responses[7]),surfaceMask,buildings:responses[6],data:hydroData,xy,onFocus:b=>{const coords=b.geometry.coordinates[0];const lon=coords.reduce((a,p)=>a+p[0],0)/coords.length,lat=coords.reduce((a,p)=>a+p[1],0)/coords.length;const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,1.6,.001):v3(.5,1.3,1.4));controls.update();},onLevel:level=>{for(const mesh of waterGroup.children)if(mesh.userData.volga){mesh.visible=level!==null;if(level!==null)mesh.position.y=(level-hydroData.baseline)*.012;}}});
   wire();setExag(3);select(-1);setMode('hydrology');$('loading').hidden=true;webMCP();
   let last=performance.now();function animate(now){requestAnimationFrame(animate);const dt=Math.max(0,Math.min((now-last)/1000,.05));last=now;
     if(state.playing){time+=dt;if(state.mode==='erosion'&&state.evolving&&!recording){state.year=Math.min(200,state.year+dt*5);$('year').value=state.year;$('yearValue').textContent=Math.round(state.year);if(Math.floor(state.year)!==lastLab){lastLab=Math.floor(state.year);applyEvolution()}if(state.year===200)togglePlay()}}
