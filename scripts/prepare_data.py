@@ -7,12 +7,13 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
-from shapely.geometry import shape, mapping, LineString, Polygon
+from shapely.geometry import shape, mapping, LineString, Polygon, box
 from shapely.ops import transform, polygonize, unary_union
 out=Path(__file__).resolve().parents[1]/'dist/data'
 boundary=shape(json.load(open(sys.argv[2]))[0]['geojson'])
 west,south,east,north=boundary.bounds
-bounds=[west-.006,south-.004,east+.006,north+.004]
+bounds=[west-.006,south-.004,east+.006,max(north+.004,56.205)]
+volga_extent=box(west,south,east,bounds[3])
 with rasterio.open(sys.argv[1]) as src:
     window=from_bounds(*bounds,src.transform).round_offsets().round_lengths()
     dem=src.read(1,window=window)
@@ -42,7 +43,8 @@ for e in data['elements']:
     if e['type']=='way' and t.get('waterway') in ['river','stream','canal']:
         coords=[(p['lon'],p['lat']) for p in e.get('geometry',[]) if 'lon' in p]
         if len(coords)<2:continue
-        parts=lines(LineString(coords).intersection(boundary))
+        is_volga=t.get('name:ru',t.get('name'))=='Волга'
+        parts=lines(LineString(coords).intersection(volga_extent if is_volga else boundary))
         if not parts:continue
         name=t.get('name:ru',t.get('name','Безымянные ручьи'))
         r=rivers.setdefault(name,{'name':name,'segments':[],'length':0,'osm_ids':[],'types':[]})
@@ -64,12 +66,21 @@ for e in data['elements']:
                 g=unary_union(list(polygonize(unary_union(outer))))
                 if inner:g=g.difference(unary_union(list(polygonize(unary_union(inner)))))
             if not g.is_valid:g=g.buffer(0)
-            for p in polys(g.intersection(boundary)):
+            is_volga=t.get('name:ru',t.get('name')) in ['Волга','Чебоксарское водохранилище']
+            for p in polys(g.intersection(volga_extent if is_volga else boundary)):
                 if p.area>1e-8:waters.append({'name':t.get('name','Водоём'),'geometry':mapping(p)})
         except Exception as ex: print('water warning',e['id'],ex)
 for r in rivers.values():
     r['length']=round(r['length']);r['types']=list(set(r['types']))
-json.dump(sorted(rivers.values(),key=lambda r:(r['name']=='Безымянные ручьи',-r['length'])),open(out/'rivers.json','w'),ensure_ascii=False,separators=(',',':'))
+json.dump(sorted(rivers.values(),key=lambda r:(r['name']!='Волга',r['name']=='Безымянные ручьи',-r['length'])),open(out/'rivers.json','w'),ensure_ascii=False,separators=(',',':'))
 json.dump(waters,open(out/'water.json','w'),ensure_ascii=False,separators=(',',':'))
 print(meta)
 print([(r['name'],r['length'],len(r['segments'])) for r in rivers.values()]);print('water polygons',len(waters))
+
+# Aligned classification mask: 0 context, 1 city land, 2 water.
+from shapely import contains_xy
+yy,xx=np.meshgrid(np.linspace(y0,y1,h),np.linspace(x0,x1,w),indexing='ij')
+mask=contains_xy(boundary,xx,yy).astype('uint8')
+water_union=unary_union([shape(v['geometry']) for v in waters])
+mask[contains_xy(water_union,xx,yy)]=2
+mask.tofile(out/'surface-mask.bin')
