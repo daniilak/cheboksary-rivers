@@ -86,3 +86,8 @@ assert.equal(observations.exposure[0].depth,.5);assert.equal(observations.exposu
 const smallFeatures=flowFeatures(small);assert.equal(smallFeatures.length,2);assert.equal(smallFeatures[1].properties.depth,observations.exposure[0].depth);
 assert.equal(smallFeatures[1].properties.vSouth,small.v[2]);
 console.log('PASS: map observations and GeoJSON use identical wet cells, depths, vectors, building contacts, elapsed time and boundary budget; requested stage cannot instantly flood the map.');
+
+const aftermath={...small,wave:{elapsed:60,event:{kind:'radial'}},depth:Float32Array.of(2,0,0,0),anomaly:Float32Array.of(0,0,0,0),maxDepth:Float32Array.of(2,0,.5,0)};
+const historyFeatures=flowFeatures(aftermath);assert.equal(historyFeatures.length,2);
+const dryAfterWave=historyFeatures.find(f=>f.properties.kind==='flood_cell');assert.equal(dryAfterWave.properties.currentlyWet,false);assert.equal(dryAfterWave.properties.maxDepthSinceSource,.5);
+console.log('PASS: wave export preserves maximum inundation after the bank dries.');

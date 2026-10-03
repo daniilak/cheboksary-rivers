@@ -1,19 +1,20 @@
 import * as THREE from 'three';
 import {seasonalScenario} from './hydrology.js';
+import {WaveView} from './wave-view.js';
 import {observeFlow,flowFeatures} from './flow-observations.js';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
 
 export class HydrologyView {
-  constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus}) {
-    Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus});
+  constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
+    Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
     this.state={rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:.3,obstacles:true,playing:false,mode:'manual'};
     this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
     const [w,s,e,n]=meta.bounds;
     this.cellX=(e-w)*111320*Math.cos((s+n)*Math.PI/360)/(meta.width-1);
     this.cellY=(n-s)*111320/(meta.height-1);this.cellArea=this.cellX*this.cellY;
-    this.buildBuildings();this.buildSections();this.buildFlow();this.bind();this.update();
+    this.buildBuildings();this.buildSections();this.buildFlow();this.waves=new WaveView(this);this.bind();this.update();
   }
   y(z){return (z-this.meta.min)*.012;}
   buildBuildings(){
@@ -103,20 +104,23 @@ export class HydrologyView {
   }
   receiveField(field){
     this.flowField=field;this.state.playing=field.running;this.sync();
+    if(this.renderedGridKey!==this.geometryKey){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
-    const positions=[],colors=[],[west,south,east,north]=field.bounds;
+    const positions=[],colors=[],cells=[],[west,south,east,north]=field.bounds;
     const a=new THREE.Color('#83c9cd'),b=new THREE.Color('#08788f');
     for(let k=0;k<field.mask.length;k++){
       if(!field.mask[k]||field.depth[k]<=.05)continue;
       const [x,z]=this.xy(west+(k%field.width+.5)/field.width*(east-west),north-(Math.floor(k/field.width)+.5)/field.height*(north-south));
-      const hx=field.dx*.0005,hz=field.dy*.0005,y=this.y(field.eta[k])+.025;
+      const hx=field.dx*.0005,hz=field.dy*.0005,y=this.y(field.eta[k])+.0002;
       positions.push(x-hx,y,z-hz,x+hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z+hz);
-      const color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));for(let i=0;i<6;i++)color.toArray(colors,colors.length);
+      cells.push(k);let color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));
+      if(this.waves.active&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
+      for(let i=0;i<6;i++)color.toArray(colors,colors.length);
     }
     if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();}
     const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    this.floodMesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));this.group.add(this.floodMesh);
+    this.floodMesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));this.floodMesh.userData.cells=cells;this.group.add(this.floodMesh);
     const color=this.buildingMesh.geometry.attributes.color,dry=new THREE.Color('#c1bba6'),wet=new THREE.Color('#e27c46');
     for(let i=0;i<this.ranges.length;i++){
       if(this.coloredBuildings&&previous[i].exposed===this.exposure[i].exposed)continue;
@@ -128,10 +132,10 @@ export class HydrologyView {
     const d=field.diagnostics;
     $('velocityRange').textContent=d.maxSpeed.toFixed(2)+' м/с';
     $('modelTime').textContent=`t = ${(d.time/3600).toFixed(2)} ч · ${field.running?'расчёт':'пауза'}`;
-    $('flow2dStatus').textContent=`${field.running?'Расчёт':'Пауза'} · ${(d.time/3600).toFixed(2)} ч · баланс ${(d.relativeBalanceError*100).toExponential(1)}% · Qвх ${Math.round(d.inletQ)} м³/с · Hвых ${d.outletLevel.toFixed(2)} м`;
+    $('flow2dStatus').textContent=`${field.running?'Расчёт':'Пауза'} · ${(d.time/3600).toFixed(2)} ч · баланс ${(d.relativeBalanceError*100).toExponential(1)}% · Qвх ${Math.round((d.inletQ??0))} м³/с · Hвых ${d.outletLevel===null?'закрыт':d.outletLevel.toFixed(2)+' м'}`;
     $('hydroStatus').textContent=d.ceilingReached?'Достигнут предел высот расчётной области — результат за пределами применимости':d.edgeWet?'Вода достигла закрытого края карты: область нужно расширить':'Русло, затопление и здания: единый водный баланс';
     $('flowCaption').textContent='Белые трассеры: рассчитанное 2D-поле, показ ×600 · песочные: направление OSM';
-    if(this.group.visible)this.onLevel(null);$('exportScenario').disabled=false;this.drawSection();
+    this.waves.receive(field);if(this.group.visible)this.onLevel(null);$('exportScenario').disabled=false;this.drawSection();
     if(this.selectedBuilding>=0)this.inspectBuilding(this.selectedBuilding);
   }
   drawHydrograph(){
@@ -173,13 +177,14 @@ export class HydrologyView {
     }
     this.geometryKey=geometryKey;this.flowWorker?.terminate();this.flowWorker=null;this.flowField=null;this.fieldTracers=null;
     if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();this.floodMesh=null;}
-    this.onLevel(this.data.baseline);$('exportScenario').disabled=true;
+    this.onLevel(this.data.baseline);$('exportScenario').disabled=true;$('waveLaunch').disabled=true;$('wavePause').disabled=true;
     $('flow2dStatus').textContent='Новая геометрия: запуск из покоя при исходном уровне…';
     this.flowTimer=setTimeout(()=>{
       try{
         const worker=new Worker(new URL('./flow-worker.js',import.meta.url),{type:'module'});this.flowWorker=worker;
         worker.onmessage=({data})=>{
           if(worker!==this.flowWorker)return;
+          if(data.waveError){$('waveStatus').textContent=data.waveError;return;}
           if(data.error){worker.terminate();this.flowWorker=null;this.flowKey=null;this.state.playing=false;this.sync();$('flow2dStatus').textContent='Расчёт остановлен: '+data.error;return;}
           this.receiveField(data);
           const cells=[];for(let k=0;k<data.mask.length;k++)if(data.mask[k]&&data.depth[k]>.05)cells.push(k);
@@ -206,7 +211,7 @@ export class HydrologyView {
     this.flow.instanceMatrix.needsUpdate=true;
   }
   pick(ray){
-    if(!this.group.visible||!this.buildingMesh.visible)return false;
+    if(!this.group.visible)return false;if(this.waves.pick(ray))return true;if(!this.buildingMesh.visible)return false;
     const hit=ray.intersectObject(this.buildingMesh)[0];if(!hit)return false;
     const vertex=hit.faceIndex*3,index=this.ranges.findIndex(([a,b])=>vertex>=a&&vertex<b);if(index<0)return false;
     this.inspectBuilding(index);return true;
@@ -222,7 +227,7 @@ export class HydrologyView {
     if(!this.flowField)throw Error('Дождитесь первого снимка расчёта');
     const features=flowFeatures(this.flowField);
     this.buildings.forEach((b,i)=>{if(this.exposure[i].exposed)features.push({type:'Feature',geometry:b.geometry,properties:{kind:'building_contact',osm:b.osm,address:b.address,adjacentCellDepth:this.exposure[i].depth,screening:'adjacent flooded grid cell; not indoor flooding'}});});
-    return {type:'FeatureCollection',metadata:{model:'coupled 2D shallow-water channel and floodplain',created:new Date().toISOString(),parametersRole:'requested controls; applied inlet/outlet values are in flow2d.diagnostics',osmSnapshot:this.data.osmSnapshot,baseline:this.data.baseline,verticalDatum:this.data.verticalDatum,parameters:{...this.state},statistics:this.stats,flow2d:{diagnostics:this.flowField.diagnostics,dx:this.flowField.dx,dy:this.flowField.dy,initialState:'baseline-connected water at rest; dry isolated depressions',bed:'synthetic flat channel; averaged Copernicus DSM on land',boundaries:'OSM river portals only: west discharge, east stage; closed other edges; forcing ramp 1800 s'},limitations:'No measured bathymetry or gauge calibration. DSM includes roofs/vegetation. Buildings occupy coarse cells at >=50% footprint coverage, narrow passages and small buildings unresolved. Contacts are not indoor flooding. High ground above baseline+12 m is closed. No tributary runoff, hydraulic structures, wind or ice. Seasonal day selects boundary values, not elapsed simulation time.'},features};
+    return {type:'FeatureCollection',metadata:{model:'coupled 2D shallow-water channel and floodplain',wave:this.flowField.wave||null,created:new Date().toISOString(),parametersRole:'requested controls; applied inlet/outlet values are in flow2d.diagnostics',osmSnapshot:this.data.osmSnapshot,baseline:this.data.baseline,verticalDatum:this.data.verticalDatum,parameters:{...this.state},statistics:this.stats,flow2d:{diagnostics:this.flowField.diagnostics,dx:this.flowField.dx,dy:this.flowField.dy,initialState:'baseline-connected water at rest; dry isolated depressions',bed:'synthetic flat channel; averaged Copernicus DSM on land',boundaries:'OSM river portals only: west discharge, east stage; closed other edges; forcing ramp 1800 s'},limitations:'No measured bathymetry or gauge calibration. DSM includes roofs/vegetation. Buildings occupy coarse cells at >=50% footprint coverage, narrow passages and small buildings unresolved. Contacts are not indoor flooding. High ground above baseline+12 m is closed. No tributary runoff, hydraulic structures, wind or ice. Seasonal day selects boundary values, not elapsed simulation time.'},features};
   }
   export(){
     if(!this.flowField)return;

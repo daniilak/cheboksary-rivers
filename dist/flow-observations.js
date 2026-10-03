@@ -20,9 +20,9 @@ export function observeFlow(field,meta,surfaceMask,buildings){
 }
 export function flowFeatures(field){
   const features=[],[west,south,east,north]=field.bounds,dx=(east-west)/field.width,dy=(north-south)/field.height;
-  for(let k=0;k<field.mask.length;k++)if(field.mask[k]&&field.depth[k]>.05){
+  for(let k=0;k<field.mask.length;k++)if(field.mask[k]&&(field.depth[k]>.05||field.maxDepth?.[k]>.05)){
     const x=west+(k%field.width)*dx,y=north-Math.floor(k/field.width)*dy;
-    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[[[x,y],[x+dx,y],[x+dx,y-dy],[x,y-dy],[x,y]]]},properties:{kind:field.river[k]?'river_cell':'flood_cell',depth:field.depth[k],waterElevation:field.eta[k],uEast:field.u[k],vSouth:field.v[k],speed:Math.hypot(field.u[k],field.v[k])}});
+    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[[[x,y],[x+dx,y],[x+dx,y-dy],[x,y-dy],[x,y]]]},properties:{kind:field.river[k]?'river_cell':'flood_cell',depth:field.depth[k],currentlyWet:field.depth[k]>.05,...(field.wave?{maxDepthSinceSource:field.maxDepth[k],changeSinceSource:field.anomaly[k]}:{}),waterElevation:field.eta[k],uEast:field.u[k],vSouth:field.v[k],speed:Math.hypot(field.u[k],field.v[k])}});
   }
   return features;
 }
