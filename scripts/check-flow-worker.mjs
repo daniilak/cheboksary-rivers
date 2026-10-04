@@ -31,9 +31,21 @@ try{
   assert.ok(Math.abs(netChange-exchanged)<1e-5,'Recession must match the integrated boundary exchange');
   console.log('PASS: actual worker starts paused, ramps stage, inundates land, preserves state when forcing changes, resumes without resetting its clock and drains conservatively.');
 
+  const sedimentParameters={...parameters,depth:1,rise:0,discharge:100,sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:0}};
+  worker.postMessage({type:'init',meta,seeds,dem,barriers,parameters:sedimentParameters,running:false});
+  const sedimentInitial=await next();worker.postMessage({type:'run',running:true});
+  let moved;do{moved=await next();}while(!moved.complete);
+  assert.ok(moved.sediment.maxErosion>0);assert.ok(moved.sediment.outgoingSolidM3>0);assert.ok(moved.sediment.boundarySolidM3<0);
+  assert.ok(moved.bed.some((z,k)=>Math.abs(z-sedimentInitial.bed[k])>1e-8),'Worker must return evolving solver bed, not initial grid');
+  for(let k=0;k<moved.bed.length;k++)if(moved.mask[k])assert.ok(Math.abs(moved.eta[k]-moved.depth[k]-moved.bed[k])<1e-5);
+  assert.ok(Math.abs(moved.sediment.balanceErrorM3)<1e-5);assert.ok(moved.diagnostics.relativeBalanceError<1e-10);
+  worker.postMessage({type:'sediment',parameters:{...sedimentParameters.sediment,enabled:false}});
+  const sedimentHeld=await next();assert.equal(sedimentHeld.diagnostics.time,moved.diagnostics.time);assert.deepEqual(sedimentHeld.depth,moved.depth);assert.deepEqual(sedimentHeld.bed,moved.bed);assert.equal(sedimentHeld.running,false);assert.equal(sedimentHeld.sediment.history.length,2);
+  console.log('PASS: actual worker couples bed transport, publishes live bed and both budgets, preserves water/bed/time on material changes.');
+
   const waveMeta={width:160,height:60,bounds:[47,56,47.08,56.03]},waveSeeds=new Uint8Array(9600),waveDem=new Float32Array(9600).fill(1.5);
   for(let y=20;y<40;y++)for(let x=0;x<160;x++){waveSeeds[y*160+x]=1;waveDem[y*160+x]=1;}
-  worker.postMessage({type:'init',meta:waveMeta,seeds:waveSeeds,dem:waveDem,barriers:new Uint8Array(9600),parameters:{baseline:1,depth:4,rise:0,discharge:0,manning:.03},running:false});
+  worker.postMessage({type:'init',meta:waveMeta,seeds:waveSeeds,dem:waveDem,barriers:new Uint8Array(9600),parameters:{baseline:1,depth:4,rise:0,discharge:0,manning:.03,sediment:{enabled:true,grainMm:.5,grainFraction:1,supply:1}},running:false});
   const waveInitial=await next();assert.equal(waveInitial.wave,null);
   const source={kind:'radial',amplitude:.5,radius:500,angle:0,lon:47.04,lat:56.015},gauges=[{name:'west',coordinates:[47.02,56.015]},{name:'source',coordinates:[47.04,56.015]},{name:'east',coordinates:[47.06,56.015]}];
   worker.postMessage({type:'wave',source,gauges,closed:true,rate:120});
@@ -42,6 +54,7 @@ try{
   do{frame=await next();}while(!frame.complete);
   assert.equal(frame.wave.elapsed,600);assert.equal(frame.diagnostics.inletQ,null);assert.equal(frame.diagnostics.outletLevel,null);
   assert.ok(frame.wave.history.length>50);assert.ok(frame.wave.gauges[1].peak>.4);assert.equal(frame.wave.gauges[1].arrival,0);
+  assert.ok(Math.abs(frame.sediment.balanceErrorM3)<1e-5);assert.equal(frame.sediment.boundarySolidM3,0);assert.ok(frame.sediment.maxErosion>0);
   assert.ok(frame.maxDepth.every((h,k)=>h+1e-6>=frame.depth[k]));assert.ok(frame.diagnostics.relativeBalanceError<1e-10);
   worker.postMessage({type:'wave',source:{...source,lon:100},gauges,closed:false,rate:120});
   assert.ok((await next()).waveError);

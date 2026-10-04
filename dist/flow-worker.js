@@ -1,7 +1,8 @@
+import {Sediment2D} from './sediment.js';
 import {ShallowWater2D} from './shallow-water.js';
 import {makeFlowGrid} from './flow-grid.js';
 import {displaceWater,nearestWetCell} from './wave-source.js';
-let grid,solver,target=0,running=false,timer,forcing,requested;
+let grid,solver,sediment,target=0,running=false,timer,forcing,requested;
 let wave=null,events=[],rate=Infinity,wallAnchor=0,timeAnchor=0;
 function anchor(){wallAnchor=performance.now();timeAnchor=solver.time;}
 function recordWave(){
@@ -16,7 +17,7 @@ function recordWave(){
 }
 function setForcing(p){
   requested=p;forcing={time:solver.time,q:solver.inletQ??requested?.discharge??0,level:solver.outletLevel??requested?.baseline??p.baseline};
-  solver.roughness=p.manning;target=solver.time+3600;if(wave)wave.closed=false;anchor();
+  solver.roughness=p.manning;sediment.configure(p.sediment);target=solver.time+3600;if(wave)wave.closed=false;anchor();
 }
 function snapshot(){
   const length=grid.mask.length,u=new Float32Array(length),v=new Float32Array(length),eta=new Float32Array(length),depth=Float32Array.from(solver.h);
@@ -31,7 +32,7 @@ function snapshot(){
   }
   const anomaly=wave?Float32Array.from(solver.h,(h,k)=>grid.mask[k]?solver.bed[k]+h-wave.reference[k]:0):null;
   const waveInfo=wave?{event:wave.event,events,closed:wave.closed,elapsed:solver.time-wave.event.time,rate,maxChange:wave.maxChange,gauges:wave.gauges,history:wave.history}:null;
-  self.postMessage({anomaly,wave:waveInfo,maxDepth:wave?Float32Array.from(wave.maxDepth):null,width:grid.width,height:grid.height,bounds:grid.bounds,dx:grid.dx,dy:grid.dy,mask:grid.mask,river:grid.river,solid:grid.solid,bed:grid.bed,u,v,eta,depth,diagnostics:{...solver.diagnostics(),edgeWet,ceilingReached:ceilingReached||!!wave?.ceilingReached,inletQ:solver.inletQ,outletLevel:solver.outletLevel},running,complete:solver.time>=target},[u.buffer,v.buffer,eta.buffer,depth.buffer]);
+  self.postMessage({anomaly,wave:waveInfo,maxDepth:wave?Float32Array.from(wave.maxDepth):null,width:grid.width,height:grid.height,bounds:grid.bounds,dx:grid.dx,dy:grid.dy,mask:grid.mask,river:grid.river,solid:grid.solid,bed:solver.bed,sediment:sediment.snapshot(),u,v,eta,depth,diagnostics:{...solver.diagnostics(),edgeWet,ceilingReached:ceilingReached||!!wave?.ceilingReached,inletQ:solver.inletQ,outletLevel:solver.outletLevel},running,complete:solver.time>=target},[u.buffer,v.buffer,eta.buffer,depth.buffer]);
 }
 let lastSnapshot=0;
 function batch(){
@@ -43,7 +44,8 @@ function batch(){
       const t=Math.min(1,(solver.time-forcing.time)/1800);
       solver.inletQ=wave?.closed?null:forcing.q+(requested.discharge-forcing.q)*t;
       solver.outletLevel=wave?.closed?null:forcing.level+(requested.baseline+requested.rise-forcing.level)*t;
-      solver.step(until-solver.time);recordWave();
+      const morphologyDt=sediment.prepare();
+      const dt=solver.step(Math.min(until-solver.time,morphologyDt));sediment.step(dt);recordWave();
     }
     if(solver.time>=target)running=false;
     if(performance.now()-lastSnapshot>(wave?250:600)||!running){snapshot();lastSnapshot=performance.now();}
@@ -54,7 +56,8 @@ self.onmessage=({data})=>{
   try{
     if(data.type==='init'){
       clearTimeout(timer);timer=null;wave=null;events=[];rate=Infinity;grid=makeFlowGrid(data.meta,data.seeds,data.parameters,data.dem,data.barriers);
-      solver=new ShallowWater2D(grid);solver.inletQ=0;setForcing(data.parameters);running=data.running!==false;snapshot();batch();
+      solver=new ShallowWater2D(grid);sediment=new Sediment2D(solver,data.parameters.sediment);solver.inletQ=0;setForcing(data.parameters);running=data.running!==false;snapshot();batch();
+    }else if(data.type==='sediment'&&solver){sediment.configure(data.parameters);requested.sediment={...data.parameters};snapshot();
     }else if(data.type==='wave'&&solver){
       try{
         if(!Array.isArray(data.gauges)||data.gauges.length!==3||data.gauges.some(g=>!Array.isArray(g.coordinates)||g.coordinates.length!==2||!g.coordinates.every(Number.isFinite)))throw Error('Некорректные точки наблюдения');

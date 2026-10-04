@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {seasonalScenario} from './hydrology.js';
+import {SedimentView} from './sediment-view.js';
 import {WaveView} from './wave-view.js';
 import {observeFlow,flowFeatures} from './flow-observations.js';
 const $=id=>document.getElementById(id);
@@ -8,13 +9,13 @@ const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
 export class HydrologyView {
   constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
     Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
-    this.state={rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:.3,obstacles:true,playing:false,mode:'manual'};
+    this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:.3,obstacles:true,playing:false,mode:'manual'};
     this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
     const [w,s,e,n]=meta.bounds;
     this.cellX=(e-w)*111320*Math.cos((s+n)*Math.PI/360)/(meta.width-1);
     this.cellY=(n-s)*111320/(meta.height-1);this.cellArea=this.cellX*this.cellY;
-    this.buildBuildings();this.buildSections();this.buildFlow();this.waves=new WaveView(this);this.bind();this.update();
+    this.buildBuildings();this.buildSections();this.buildFlow();this.waves=new WaveView(this);this.sediments=new SedimentView(this);this.bind();this.update();
   }
   y(z){return (z-this.meta.min)*.012;}
   buildBuildings(){
@@ -104,7 +105,8 @@ export class HydrologyView {
   }
   receiveField(field){
     this.flowField=field;this.state.playing=field.running;this.sync();
-    if(this.renderedGridKey!==this.geometryKey){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
+    this.sediments.receive(field);
+    if(this.renderedGridKey!==this.geometryKey||field.sediment){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
     const positions=[],colors=[],cells=[],[west,south,east,north]=field.bounds;
@@ -116,6 +118,7 @@ export class HydrologyView {
       positions.push(x-hx,y,z-hz,x+hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z+hz);
       cells.push(k);let color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));
       if(this.waves.active&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
+      color=this.sediments.color(k,field,color);
       for(let i=0;i<6;i++)color.toArray(colors,colors.length);
     }
     if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();}
@@ -166,14 +169,15 @@ export class HydrologyView {
     this.flow.visible=!!this.flowField;
     if(this.flowField&&this.fieldTracers)this.animate2D(dt);
   }
+  flowParameters(){return {sediment:{...this.state.sediment},baseline:this.data.baseline,depth:this.state.depth,rise:this.state.rise,discharge:this.state.discharge,manning:this.state.manning,obstacles:this.state.obstacles};}
   queue2D(){
-    const parameters={baseline:this.data.baseline,depth:this.state.depth,rise:this.state.rise,discharge:this.state.discharge,manning:this.state.manning,obstacles:this.state.obstacles};
+    const parameters=this.flowParameters();
     const geometryKey=[parameters.depth,parameters.obstacles].join('/');
     const key=JSON.stringify(parameters);
     if(key===this.flowKey)return;
     this.flowKey=key;this.requestedRunning=true;this.state.playing=true;this.sync();clearTimeout(this.flowTimer);
     if(this.flowWorker&&geometryKey===this.geometryKey){
-      this.flowTimer=setTimeout(()=>this.flowWorker.postMessage({type:'parameters',parameters,running:this.requestedRunning}),200);return;
+      this.flowTimer=setTimeout(()=>this.flowWorker.postMessage({type:'parameters',parameters:this.flowParameters(),running:this.requestedRunning}),200);return;
     }
     this.geometryKey=geometryKey;this.flowWorker?.terminate();this.flowWorker=null;this.flowField=null;this.fieldTracers=null;
     if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();this.floodMesh=null;}
@@ -192,7 +196,7 @@ export class HydrologyView {
           if(!this.fieldTracers)this.fieldTracers=Array.from({length:240},(_,i)=>{const k=cells[Math.floor(i*cells.length/240)];return {x:k%data.width+.5,y:Math.floor(k/data.width)+.5,home:k};});
         };
         worker.onerror=()=>{worker.terminate();this.flowWorker=null;this.flowKey=null;this.state.playing=false;this.sync();$('flow2dStatus').textContent='Ошибка 2D: расчёт остановлен, показан последний полученный снимок';};
-        worker.postMessage({type:'init',running:this.requestedRunning,meta:this.meta,seeds:this.seeds,dem:this.dem,barriers:this.barriers,parameters});
+        worker.postMessage({type:'init',running:this.requestedRunning,meta:this.meta,seeds:this.seeds,dem:this.dem,barriers:this.barriers,parameters:this.flowParameters()});
       }catch(error){$('flow2dStatus').textContent='2D недоступен: '+error.message;}
     },200);
   }
@@ -227,7 +231,7 @@ export class HydrologyView {
     if(!this.flowField)throw Error('Дождитесь первого снимка расчёта');
     const features=flowFeatures(this.flowField);
     this.buildings.forEach((b,i)=>{if(this.exposure[i].exposed)features.push({type:'Feature',geometry:b.geometry,properties:{kind:'building_contact',osm:b.osm,address:b.address,adjacentCellDepth:this.exposure[i].depth,screening:'adjacent flooded grid cell; not indoor flooding'}});});
-    return {type:'FeatureCollection',metadata:{model:'coupled 2D shallow-water channel and floodplain',wave:this.flowField.wave||null,created:new Date().toISOString(),parametersRole:'requested controls; applied inlet/outlet values are in flow2d.diagnostics',osmSnapshot:this.data.osmSnapshot,baseline:this.data.baseline,verticalDatum:this.data.verticalDatum,parameters:{...this.state},statistics:this.stats,flow2d:{diagnostics:this.flowField.diagnostics,dx:this.flowField.dx,dy:this.flowField.dy,initialState:'baseline-connected water at rest; dry isolated depressions',bed:'synthetic flat channel; averaged Copernicus DSM on land',boundaries:'OSM river portals only: west discharge, east stage; closed other edges; forcing ramp 1800 s'},limitations:'No measured bathymetry or gauge calibration. DSM includes roofs/vegetation. Buildings occupy coarse cells at >=50% footprint coverage, narrow passages and small buildings unresolved. Contacts are not indoor flooding. High ground above baseline+12 m is closed. No tributary runoff, hydraulic structures, wind or ice. Seasonal day selects boundary values, not elapsed simulation time.'},features};
+    return {type:'FeatureCollection',metadata:{model:'coupled 2D shallow-water channel and floodplain',wave:this.flowField.wave||null,sediment:this.flowField.sediment?Object.fromEntries(Object.entries(this.flowField.sediment).filter(([key])=>!['change','shear','mobility'].includes(key))):null,created:new Date().toISOString(),parametersRole:'requested controls; applied inlet/outlet values are in flow2d.diagnostics',osmSnapshot:this.data.osmSnapshot,baseline:this.data.baseline,verticalDatum:this.data.verticalDatum,parameters:{...this.state},statistics:this.stats,flow2d:{diagnostics:this.flowField.diagnostics,dx:this.flowField.dx,dy:this.flowField.dy,initialState:'baseline-connected water at rest; dry isolated depressions',bed:'initial synthetic flat channel and averaged DSM; optional coupled Exner bed-load evolution',boundaries:'OSM river portals only: west discharge, east stage; closed other edges; forcing ramp 1800 s'},limitations:'No measured bathymetry or gauge calibration. Sediment is an assumed uniform noncohesive 0.5 m layer, MPM bed load only, no suspended load, bank collapse, slope correction or mapped bank protection. DSM includes roofs/vegetation. Buildings occupy coarse cells at >=50% footprint coverage, narrow passages and small buildings unresolved. Contacts are not indoor flooding. High ground above baseline+12 m is closed. No tributary runoff, hydraulic structures, wind or ice. Seasonal day selects boundary values, not elapsed simulation time.'},features};
   }
   export(){
     if(!this.flowField)return;

@@ -79,7 +79,7 @@ assert.equal(cells.length,field.depth.filter((v,k)=>v>.05&&field.mask[k]).length
 for(const f of exported.features){if(f.geometry.type==='Polygon')for(const ring of f.geometry.coordinates){assert.deepEqual(ring[0],ring.at(-1));assert.ok(ring.flat().every(Number.isFinite));}}
 assert.ok(cells.every(f=>f.properties.waterElevation===data.baseline),'Requested rise must not instantly refill the interior');
 assert.equal(exported.metadata.flow2d.diagnostics.time,0);
-const small={width:2,height:2,bounds:[0,0,2,2],dx:10,dy:10,mask:Uint8Array.of(1,0,1,1),river:Uint8Array.of(1,0,0,0),depth:Float32Array.of(2,0,.5,0),u:Float32Array.of(.1,0,.2,0),v:Float32Array.of(.2,0,-.1,0),eta:Float32Array.of(2,0,.5,0)};
+const small={bed:new Float32Array(4),width:2,height:2,bounds:[0,0,2,2],dx:10,dy:10,mask:Uint8Array.of(1,0,1,1),river:Uint8Array.of(1,0,0,0),depth:Float32Array.of(2,0,.5,0),u:Float32Array.of(.1,0,.2,0),v:Float32Array.of(.2,0,-.1,0),eta:Float32Array.of(2,0,.5,0)};
 const observations=observeFlow(small,{width:2,height:2},Uint8Array.of(2,1,1,1),[{contactCells:[2]},{contactCells:[3]}]);
 assert.equal(observations.stats.areaKm2,.0001);assert.equal(observations.stats.volumeM3,50);assert.equal(observations.stats.buildingsNearWater,1);
 assert.equal(observations.exposure[0].depth,.5);assert.equal(observations.exposure[1].exposed,false);
@@ -91,3 +91,10 @@ const aftermath={...small,wave:{elapsed:60,event:{kind:'radial'}},depth:Float32A
 const historyFeatures=flowFeatures(aftermath);assert.equal(historyFeatures.length,2);
 const dryAfterWave=historyFeatures.find(f=>f.properties.kind==='flood_cell');assert.equal(dryAfterWave.properties.currentlyWet,false);assert.equal(dryAfterWave.properties.maxDepthSinceSource,.5);
 console.log('PASS: wave export preserves maximum inundation after the bank dries.');
+
+const sedimentField={...small,sediment:{change:Float32Array.of(-.01,0,.005,.002),shear:Float32Array.of(1,0,2,0),mobility:Float32Array.of(1.5,0,3,0),history:[{time:0,parameters:{enabled:true,grainMm:1}}],balanceErrorM3:0,parameters:{enabled:true,grainMm:1}}};
+const sedimentExport=JSON.parse(JSON.stringify(View.prototype.createExport.call({...context,flowField:sedimentField})));
+assert.equal(sedimentExport.metadata.sediment.history[0].parameters.grainMm,1);assert.equal(sedimentExport.metadata.sediment.change,undefined);
+assert.equal(sedimentExport.features.filter(f=>f.properties.kind.endsWith('_cell')).length,3);
+assert.ok(sedimentExport.features.some(f=>!f.properties.currentlyWet&&f.properties.bedChange>0));
+console.log('PASS: actual exporter retains sediment settings/history and dry deposited cells without duplicating raster arrays.');
