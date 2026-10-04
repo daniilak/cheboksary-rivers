@@ -56,11 +56,13 @@ try{
   assert.ok(frame.wave.history.length>50);assert.ok(frame.wave.gauges[1].peak>.4);assert.equal(frame.wave.gauges[1].arrival,0);
   assert.ok(Math.abs(frame.sediment.balanceErrorM3)<1e-5);assert.equal(frame.sediment.boundarySolidM3,0);assert.ok(frame.sediment.maxErosion>0);
   assert.ok(frame.maxDepth.every((h,k)=>h+1e-6>=frame.depth[k]));assert.ok(frame.diagnostics.relativeBalanceError<1e-10);
+  worker.postMessage({type:'parameters',parameters:{baseline:1,depth:4,rise:0,discharge:0,manning:.035,sediment:frame.sediment.parameters},running:false});
+  const changedForcing=await next();assert.equal(changedForcing.wave.closed,true,'Common river controls must not silently reopen a closed basin');assert.deepEqual(changedForcing.bed,frame.bed);assert.deepEqual(changedForcing.depth,frame.depth);assert.equal(changedForcing.wave.events.length,1);
   worker.postMessage({type:'wave',source:{...source,lon:100},gauges,closed:false,rate:120});
   assert.ok((await next()).waveError);
   worker.postMessage({type:'run',running:false});const afterInvalid=await next();assert.deepEqual(afterInvalid.depth,frame.depth);
   worker.postMessage({type:'wave',source:{...source,kind:'dipole'},gauges,closed:true,rate:120});
-  const secondWave=await next();assert.equal(secondWave.wave.events.length,2);assert.equal(secondWave.wave.event.time,600);
+  const secondWave=await next();assert.equal(secondWave.wave.events.length,2);assert.equal(secondWave.wave.event.time,600);assert.deepEqual(secondWave.bed,afterInvalid.bed,'A new wave must retain the already eroded bed');assert.equal(secondWave.sediment.steps,afterInvalid.sediment.steps);assert.ok(Math.abs(secondWave.diagnostics.volume-afterInvalid.diagnostics.volume)<1e-5);
   worker.postMessage({type:'run',running:false});let stopped=await next();while(stopped.running)stopped=await next();assert.equal(stopped.running,false);
   console.log('PASS: worker launches and paces waves, records virtual gauges/maxima, closes boundaries, rejects invalid sources without mutation and retains repeated-source history.');
 }finally{await worker.terminate();}

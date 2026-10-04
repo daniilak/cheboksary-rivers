@@ -28,6 +28,8 @@ jobs:
         run: |
           node --check dist/app.js
           node --check dist/hydrology-view.js
+          node --check dist/wave-view.js
+          node --check dist/sediment-view.js
           node scripts/check-hydrology.mjs
           node --check dist/flow-worker.js
           node scripts/check-shallow-water.mjs

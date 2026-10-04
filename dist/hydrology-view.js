@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {seasonalScenario} from './hydrology.js';
-import {SedimentView} from './sediment-view.js';
-import {WaveView} from './wave-view.js';
+import {SedimentView} from './sediment-view.js?v=unified-1';
+import {WaveView} from './wave-view.js?v=unified-1';
 import {observeFlow,flowFeatures} from './flow-observations.js';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
@@ -10,7 +10,7 @@ export class HydrologyView {
   constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
     Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
     this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:.3,obstacles:true,playing:false,mode:'manual'};
-    this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
+    this.display='depth';this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
     const [w,s,e,n]=meta.bounds;
     this.cellX=(e-w)*111320*Math.cos((s+n)*Math.PI/360)/(meta.width-1);
@@ -74,8 +74,7 @@ export class HydrologyView {
     $('showBuildings').onchange=e=>{this.buildingMesh.visible=e.target.checked;};
     $('useBuildings').onchange=e=>{this.state.obstacles=e.target.checked;this.update();};
     $('showSections').onchange=e=>{this.sectionLines.visible=e.target.checked;};
-    $('use2D').onchange=e=>this.setRunning(e.target.checked);
-    $('recomputeFlow').onclick=()=>this.setRunning(true);
+    $('mapDisplay').onchange=e=>{this.display=e.target.value;if(this.flowField)this.receiveField(this.flowField);};
     $('resetFlow').onclick=()=>{this.flowKey=null;this.geometryKey=null;this.queue2D();};
     $('section').oninput=e=>{this.selectedSection=Number(e.target.value);this.drawSection();};
     $('exportScenario').onclick=()=>this.export();
@@ -94,11 +93,10 @@ export class HydrologyView {
     $('stageValue').textContent=`+${s.rise.toFixed(2)} м`;$('dischargeValue').textContent=`${Math.round(s.discharge).toLocaleString('ru-RU')} м³/с`;
     $('depthValue').textContent=s.depth.toFixed(1)+' м';$('roughnessValue').textContent=s.manning.toFixed(3);
     $('dayValue').textContent=`${Math.round(s.day)} / 120`;$('peakValue').textContent=s.peak.toFixed(1)+' м';
-    $('seasonPlay').textContent=s.playing?'Ⅱ':'▶';$('seasonPlay').setAttribute('aria-label',s.playing?'Приостановить расчёт':'Продолжить расчёт на час');
-    $('use2D').checked=s.playing;$('recomputeFlow').disabled=s.playing;
+    $('seasonPlay').textContent=s.playing?'Ⅱ Пауза':'▶ Продолжить';$('seasonPlay').setAttribute('aria-label',s.playing?'Приостановить всю симуляцию':'Продолжить всю симуляцию');
     $('hydroMode').textContent=s.mode==='season'?'ГРАНИЧНЫЕ УСЛОВИЯ ИЗ СЦЕНАРИЯ':'УРОВЕНЬ НА ВЫХОДЕ · РАСХОД НА ВХОДЕ';
     $('waterDatum').textContent=`${(this.data.baseline+s.rise).toFixed(2)} м EGM2008 на выходе · ноль ${this.data.baseline.toFixed(2)} м по DSM`;
-    for(const b of document.querySelectorAll('[data-scenario]'))b.classList.toggle('active',b.dataset.scenario==='spring'?s.mode==='season':s.mode==='manual'&&(b.dataset.scenario==='base'?s.rise===0:s.rise===3));
+    for(const b of document.querySelectorAll('[data-scenario]'))b.classList.toggle('active',b.dataset.scenario==='spring'?s.mode==='season':s.mode==='manual'&&(b.dataset.scenario==='base'?s.rise===0&&s.discharge===2500:s.rise===3&&s.discharge===10000));
   }
   update(){
     this.sync();this.drawSection();this.drawHydrograph();this.queue2D();
@@ -106,6 +104,8 @@ export class HydrologyView {
   receiveField(field){
     this.flowField=field;this.state.playing=field.running;this.sync();
     this.sediments.receive(field);
+    const waveLimit=field.wave?Math.max(.05,field.wave.event.raised,-field.wave.event.lowered):0;
+    $('mapLegend').textContent=this.display==='wave'?(field.wave?`Синий: впадина · оранжевый: гребень · ±${waveLimit.toFixed(2)} м`:'Волна ещё не запущена; показана глубина'):this.display==='change'?`Красный: размыв · синий: отложение · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Бирюзовый: ниже порога · оранжевый: выше порога':'Светлая вода: мельче · тёмная: глубже (до 4 м)';
     if(this.renderedGridKey!==this.geometryKey||field.sediment){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
@@ -117,7 +117,7 @@ export class HydrologyView {
       const hx=field.dx*.0005,hz=field.dy*.0005,y=this.y(field.eta[k])+.0002;
       positions.push(x-hx,y,z-hz,x+hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z+hz);
       cells.push(k);let color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));
-      if(this.waves.active&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
+      if(this.display==='wave'&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
       color=this.sediments.color(k,field,color);
       for(let i=0;i<6;i++)color.toArray(colors,colors.length);
     }
@@ -181,11 +181,11 @@ export class HydrologyView {
     }
     this.geometryKey=geometryKey;this.flowWorker?.terminate();this.flowWorker=null;this.flowField=null;this.fieldTracers=null;
     if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();this.floodMesh=null;}
-    this.onLevel(this.data.baseline);$('exportScenario').disabled=true;$('waveLaunch').disabled=true;$('wavePause').disabled=true;
+    this.onLevel(this.data.baseline);$('exportScenario').disabled=true;$('waveLaunch').disabled=true;
     $('flow2dStatus').textContent='Новая геометрия: запуск из покоя при исходном уровне…';
     this.flowTimer=setTimeout(()=>{
       try{
-        const worker=new Worker(new URL('./flow-worker.js',import.meta.url),{type:'module'});this.flowWorker=worker;
+        const worker=new Worker(new URL('./flow-worker.js?v=unified-1',import.meta.url),{type:'module'});this.flowWorker=worker;
         worker.onmessage=({data})=>{
           if(worker!==this.flowWorker)return;
           if(data.waveError){$('waveStatus').textContent=data.waveError;return;}

@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const names={radial:'Круговая волна',dipole:'Гребень и впадина',seiche:'Перекос водоёма'};
 export class WaveView{
   constructor(view){
-    this.view=view;this.active=false;this.picking=false;
+    this.view=view;this.active=true;this.picking=false;
     const index=Math.floor(view.data.sections.length/2);
     this.state={kind:'radial',amplitude:1,radius:700,angle:0,index,source:[...view.data.sections[index].center],closed:false,rate:30};
     this.marker=new THREE.Mesh(new THREE.RingGeometry(.97,1.03,80),new THREE.MeshBasicMaterial({color:0xf2a34f,side:THREE.DoubleSide,depthTest:false}));
@@ -16,14 +16,10 @@ export class WaveView{
     $('waveSource').max=view.data.sections.length-1;
     $('waveSource').oninput=e=>{this.state.index=Number(e.target.value);this.state.source=[...view.data.sections[this.state.index].center];this.picking=false;this.sync();};
     $('wavePick').onclick=()=>{this.picking=!this.picking;this.sync();};
-    $('waveLaunch').onclick=()=>this.launch();$('wavePause').onclick=()=>view.toggleSeason();
+    $('waveLaunch').onclick=()=>this.launch();
+    $('waveSettingsButton').onclick=()=>{$('waveControls').open=true;$('waveControls').scrollIntoView({block:'nearest',behavior:'smooth'});this.sync();};
+    $('waveControls').ontoggle=()=>this.updateMarker();
     this.sync();
-  }
-  setMode(active){
-    this.active=active;this.picking=false;
-    $('waveControls').hidden=!active;$('riverControls').hidden=active;$('wavePanel').hidden=!active;
-    if(active)this.view.setRunning(false);
-    this.sync();if(this.view.flowField)this.view.receiveField(this.view.flowField);
   }
   sync(){
     const s=this.state;
@@ -36,7 +32,7 @@ export class WaveView{
   }
   updateMarker(){
     const s=this.state,f=this.view.flowField;
-    this.marker.visible=this.active&&s.kind!=='seiche';
+    this.marker.visible=this.active&&s.kind!=='seiche'&&(this.picking||$('waveControls').open);
     const [x,z]=this.view.xy(...s.source);let elevation=this.view.data.baseline;
     if(f){const [w,b,e,n]=f.bounds,col=Math.floor((s.source[0]-w)/(e-w)*f.width),row=Math.floor((n-s.source[1])/(n-b)*f.height);elevation=f.eta[row*f.width+col]||elevation;}
     this.marker.position.set(x,this.view.y(elevation)+.075,z);this.marker.scale.setScalar(s.radius/1000);
@@ -64,10 +60,8 @@ export class WaveView{
     $('waveStatus').textContent='Подготовка возмущения…';
   }
   receive(field){
-    $('waveLaunch').disabled=false;$('wavePause').disabled=false;
-    $('wavePause').textContent=field.running?'Пауза':'Продолжить';
+    $('waveLaunch').disabled=false;
     this.updateMarker();const w=field.wave;
-    $('recomputeFlow').textContent=w?'Продолжить ещё на 10 минут':'Продолжить ещё на час';
     if(!w){$('waveTime').textContent='Источник ещё не запущен';$('waveStatus').textContent='Задайте возмущение поверхности. Общий объём воды сохранится.';$('waveGraph').innerHTML='';$('waveGaugeStats').textContent='';$('wavePeak').textContent='—';$('waveExtent').textContent='';return;}
     $('waveTime').textContent=`После источника ${(w.elapsed/60).toFixed(2)} мин · ${field.running?'расчёт':'пауза'} · ×${w.rate}`;
     $('wavePeak').textContent=w.maxChange.toFixed(2)+' м';

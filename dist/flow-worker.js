@@ -17,7 +17,7 @@ function recordWave(){
 }
 function setForcing(p){
   requested=p;forcing={time:solver.time,q:solver.inletQ??requested?.discharge??0,level:solver.outletLevel??requested?.baseline??p.baseline};
-  solver.roughness=p.manning;sediment.configure(p.sediment);target=solver.time+3600;if(wave)wave.closed=false;anchor();
+  solver.roughness=p.manning;sediment.configure(p.sediment);target=solver.time+3600;anchor();
 }
 function snapshot(){
   const length=grid.mask.length,u=new Float32Array(length),v=new Float32Array(length),eta=new Float32Array(length),depth=Float32Array.from(solver.h);
