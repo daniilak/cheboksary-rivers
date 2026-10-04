@@ -62,12 +62,12 @@ export class WaveView{
   receive(field){
     $('waveLaunch').disabled=false;
     this.updateMarker();const w=field.wave;
-    if(!w){$('waveTime').textContent='Источник ещё не запущен';$('waveStatus').textContent='Задайте возмущение поверхности. Общий объём воды сохранится.';$('waveGraph').innerHTML='';$('waveGaugeStats').textContent='';$('wavePeak').textContent='—';$('waveExtent').textContent='';return;}
-    $('waveTime').textContent=`После источника ${(w.elapsed/60).toFixed(2)} мин · ${field.running?'расчёт':'пауза'} · ×${w.rate}`;
+    if(!w){$('waveTime').textContent='';$('waveStatus').textContent='';$('waveGraph').innerHTML='';$('waveGaugeStats').textContent='';$('wavePeak').textContent='—';$('waveExtent').textContent='';return;}
+    $('waveTime').textContent=`Волна: ${(w.elapsed/60).toFixed(2)} мин · ${field.running?'расчёт':'пауза'} · ×${w.rate}`;
     $('wavePeak').textContent=w.maxChange.toFixed(2)+' м';
     const event=w.event;let flooded=0;for(let k=0;k<field.mask.length;k++)if(field.mask[k]&&!field.river[k]&&field.maxDepth[k]>.05)flooded++;
     $('waveExtent').textContent=`Максимальный охват суши ${(flooded*field.dx*field.dy/1e6).toFixed(2)} км² с начала опыта`;
-    $('waveStatus').textContent=`${names[event.kind]}: подъём +${event.raised.toFixed(2)} / спад ${event.lowered.toFixed(2)} м · перемещено ${Math.round(event.displacedVolume).toLocaleString('ru-RU')} м³ · ${w.closed?'вход и выход закрыты':'обычные открытые речные границы'}${event.scale<.999?' · амплитуда ограничена глубиной/областью':''}`;
+    $('waveStatus').textContent=event.scale<.999?'Амплитуда ограничена глубиной':w.closed?'Замкнутый бассейн':'';
     $('waveGaugeStats').textContent=w.gauges.map(g=>`${g.name}: пик |ΔH| ${g.peak.toFixed(2)} м, ≥5 см ${g.arrival===null?'ещё нет':(g.arrival/60).toFixed(2)+' мин'}`).join(' · ');
     const limit=Math.max(.05,...w.history.flatMap(p=>p.values.map(Math.abs))),duration=Math.max(60,w.elapsed),colors=['#568fba','#ce8843','#6a9c69'];
     $('waveGraph').innerHTML=`<line x1="25" x2="285" y1="60" y2="60" stroke="#aabbb0"/><text x="0" y="12">+${limit.toFixed(2)}</text><text x="0" y="109">−${limit.toFixed(2)} м</text><text x="250" y="125">${(duration/60).toFixed(1)} мин</text>`+w.gauges.map((g,i)=>`<polyline points="${w.history.map(p=>`${25+p.time/duration*260},${60-p.values[i]/limit*48}`).join(' ')}" fill="none" stroke="${colors[i]}" stroke-width="2"/>`).join('');

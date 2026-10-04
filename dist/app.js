@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TerrainEvolution} from './erosion.js';
-import {HydrologyView} from './hydrology-view.js?v=unified-1';
+import {HydrologyView} from './hydrology-view.js?v=compact-1';
 import {OrbitControls} from './vendor/OrbitControls.js';
 const $=id=>document.getElementById(id);
 const state={mode:'hydrology',selected:-1,exag:3,flow:1,sed:.6,year:0,lab:true,playing:true,top:false,evolving:false,compare:false};

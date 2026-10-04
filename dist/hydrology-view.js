@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {seasonalScenario} from './hydrology.js';
-import {SedimentView} from './sediment-view.js?v=unified-1';
-import {WaveView} from './wave-view.js?v=unified-1';
+import {SedimentView} from './sediment-view.js?v=compact-1';
+import {WaveView} from './wave-view.js?v=compact-1';
 import {observeFlow,flowFeatures} from './flow-observations.js';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
@@ -105,7 +105,7 @@ export class HydrologyView {
     this.flowField=field;this.state.playing=field.running;this.sync();
     this.sediments.receive(field);
     const waveLimit=field.wave?Math.max(.05,field.wave.event.raised,-field.wave.event.lowered):0;
-    $('mapLegend').textContent=this.display==='wave'?(field.wave?`Синий: впадина · оранжевый: гребень · ±${waveLimit.toFixed(2)} м`:'Волна ещё не запущена; показана глубина'):this.display==='change'?`Красный: размыв · синий: отложение · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Бирюзовый: ниже порога · оранжевый: выше порога':'Светлая вода: мельче · тёмная: глубже (до 4 м)';
+    $('mapLegend').textContent=this.display==='wave'?(field.wave?`Синий − / оранжевый + · ±${waveLimit.toFixed(2)} м`:'Нет волны · глубина'):this.display==='change'?`Красный − / синий + · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Ниже / выше порога':'Светлее — мельче · темнее — глубже';
     if(this.renderedGridKey!==this.geometryKey||field.sediment){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
@@ -135,8 +135,9 @@ export class HydrologyView {
     const d=field.diagnostics;
     $('velocityRange').textContent=d.maxSpeed.toFixed(2)+' м/с';
     $('modelTime').textContent=`t = ${(d.time/3600).toFixed(2)} ч · ${field.running?'расчёт':'пауза'}`;
-    $('flow2dStatus').textContent=`${field.running?'Расчёт':'Пауза'} · ${(d.time/3600).toFixed(2)} ч · баланс ${(d.relativeBalanceError*100).toExponential(1)}% · Qвх ${Math.round((d.inletQ??0))} м³/с · Hвых ${d.outletLevel===null?'закрыт':d.outletLevel.toFixed(2)+' м'}`;
-    $('hydroStatus').textContent=d.ceilingReached?'Достигнут предел высот расчётной области — результат за пределами применимости':d.edgeWet?'Вода достигла закрытого края карты: область нужно расширить':'Русло, затопление и здания: единый водный баланс';
+    $('flow2dStatus').textContent='';
+    $('flowDetails').textContent=`${field.running?'Расчёт':'Пауза'} · ${(d.time/3600).toFixed(2)} ч · баланс ${(d.relativeBalanceError*100).toExponential(1)}% · Qвх ${Math.round((d.inletQ??0))} м³/с · Hвых ${d.outletLevel===null?'закрыт':d.outletLevel.toFixed(2)+' м'}`;
+    $('hydroStatus').textContent=d.ceilingReached?'Достигнут предел высот расчётной области — результат за пределами применимости':d.edgeWet?'Вода достигла закрытого края карты: область нужно расширить':'';
     $('flowCaption').textContent='Белые трассеры: рассчитанное 2D-поле, показ ×600 · песочные: направление OSM';
     this.waves.receive(field);if(this.group.visible)this.onLevel(null);$('exportScenario').disabled=false;this.drawSection();
     if(this.selectedBuilding>=0)this.inspectBuilding(this.selectedBuilding);
@@ -185,7 +186,7 @@ export class HydrologyView {
     $('flow2dStatus').textContent='Новая геометрия: запуск из покоя при исходном уровне…';
     this.flowTimer=setTimeout(()=>{
       try{
-        const worker=new Worker(new URL('./flow-worker.js?v=unified-1',import.meta.url),{type:'module'});this.flowWorker=worker;
+        const worker=new Worker(new URL('./flow-worker.js?v=compact-1',import.meta.url),{type:'module'});this.flowWorker=worker;
         worker.onmessage=({data})=>{
           if(worker!==this.flowWorker)return;
           if(data.waveError){$('waveStatus').textContent=data.waveError;return;}
