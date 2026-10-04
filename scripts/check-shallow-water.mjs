@@ -35,10 +35,11 @@ const baseline=JSON.parse(fs.readFileSync(new URL('../dist/data/hydrology.json',
 const terrainBytes=fs.readFileSync(new URL('../dist/data/terrain.bin',import.meta.url));
 const terrain=new Float32Array(terrainBytes.buffer,terrainBytes.byteOffset,terrainBytes.byteLength/4);
 const barriers=fs.readFileSync(new URL('../dist/data/building-mask.bin',import.meta.url));
-for(const [depth,rise,discharge] of [[8,0,2500],[2,0,20000],[20,6,10000]]){
+for(const [depth,rise,discharge] of [[8,0,2500],[8,0,10000],[2,0,20000],[20,6,10000]]){
   const grid=makeFlowGrid(meta,seeds,{baseline,depth,rise,discharge,manning:.03},terrain,barriers);
   const model=new ShallowWater2D(grid),started=performance.now();
   while(model.time<3600){model.outletLevel=baseline+rise*Math.min(1,model.time/1800);model.step(3600-model.time);}
+  if(rise===0){for(const fraction of [.25,.5,.75]){const x=Math.floor(grid.width*fraction);let eastwardQ=0;for(let y=0;y<grid.height;y++){const k=y*grid.width+x;if(grid.mask[k])eastwardQ+=model.hu[k]*grid.dy;}assert.ok(eastwardQ>0,`Volga must carry water east at section ${fraction}, Q=${discharge}; got ${eastwardQ}`);}}
   const d=model.diagnostics();assert.ok(d.relativeBalanceError<1e-10);assert.ok(d.minDepth>=0);assert.ok(Number.isFinite(d.maxSpeed));assert.ok(d.maxSpeed>0);
   assert.ok(model.active.some(k=>Math.abs(model.hv[k])>1e-3),'Real curved OSM banks must generate a lateral velocity component');
   console.log(`PASS: 1-hour Volga SWE run, h=${depth}, ΔH=${rise}, Q=${discharge}: ${Math.round(performance.now()-started)} ms`,d);

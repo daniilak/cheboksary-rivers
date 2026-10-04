@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TerrainEvolution} from './erosion.js';
-import {HydrologyView} from './hydrology-view.js?v=compact-1';
+import {HydrologyView} from './hydrology-view.js?v=direction-1';
 import {OrbitControls} from './vendor/OrbitControls.js';
 const $=id=>document.getElementById(id);
 const state={mode:'hydrology',selected:-1,exag:3,flow:1,sed:.6,year:0,lab:true,playing:true,top:false,evolving:false,compare:false};
@@ -80,6 +80,8 @@ function focusBend(){if(state.selected<0)select(rivers.findIndex(r=>r.name==='С
 function setExag(value){state.exag=value;$('exag').value=value;$('exagValue').textContent=value+'×';world.scale.y=value/12;}
 function togglePlay(){if(state.mode==='hydrology'){hydrology.toggleSeason();return;}if(state.year>=200&&!state.evolving)setYear(0);state.evolving=!state.evolving;syncLab()}
 function wire(){for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{if($('info').open)$('info').close();setMode(b.dataset.mode);};rivers.forEach((r,i)=>{const b=document.createElement('button');b.className='river';b.dataset.river=i;const label=document.createElement('span');label.textContent=r.name;const length=document.createElement('small');length.textContent=fmt(r.length)+' км';b.append(label,length);b.onclick=()=>select(i);$('rivers').append(b)});$('all').dataset.river=-1;$('all').onclick=()=>select(-1);$('exag').oninput=e=>setExag(Number(e.target.value));$('flow').oninput=e=>{state.flow=Number(e.target.value);$('flowValue').textContent=state.flow.toFixed(1)+'×';applyEvolution()};$('sed').oninput=e=>{state.sed=Number(e.target.value);$('sedValue').textContent=state.sed.toFixed(1);applyEvolution()};$('year').oninput=e=>{state.evolving=false;setYear(Number(e.target.value))};$('play').onclick=togglePlay;$('experiment').onclick=()=>{state.evolving=false;state.compare=false;setYear(0)};$('compare').onclick=()=>{state.compare=!state.compare;syncLab();applyEvolution()};$('bend').onclick=focusBend;$('record').onclick=recordVideo;$('view3d').onclick=()=>setView(false);$('viewTop').onclick=()=>setView(true);$('reset').onclick=frame;for(const id of ['about','sources'])$(id).onclick=()=>$('info').showModal();$('closeInfo').onclick=()=>$('info').close();$('info').onclick=e=>{if(e.target===$('info')){const r=$('info').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('info').close()}};window.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','BUTTON','TEXTAREA','SELECT'].includes(e.target.tagName)&&!$('info').open){e.preventDefault();togglePlay()}});let down;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5||e.button!==0)return;const r=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(riverGroup.children).find(h=>h.object.userData.river!==undefined);if(hydrology?.pick(ray))return;if(hit)select(hit.object.userData.river)});$('heightLegend').textContent=`${Math.round(meta.min)}–${Math.round(meta.max)}`}
+// North is -z; with the camera east of target its screen projection points right.
+function compassRotation(x,z){return Math.atan2(x,z)}
 function setView(top){state.top=top;$('view3d').classList.toggle('active',!top);$('viewTop').classList.toggle('active',top);frame()}
 async function recordVideo(){
   if(recording)return;
@@ -129,6 +131,6 @@ async function start(){try{
   wire();setExag(3);select(-1);setMode('hydrology');$('loading').hidden=true;webMCP();
   let last=performance.now();function animate(now){requestAnimationFrame(animate);const dt=Math.max(0,Math.min((now-last)/1000,.05));last=now;
     if(state.playing){time+=dt;if(state.mode==='erosion'&&state.evolving&&!recording){state.year=Math.min(200,state.year+dt*5);$('year').value=state.year;$('yearValue').textContent=Math.round(state.year);if(Math.floor(state.year)!==lastLab){lastLab=Math.floor(state.year);applyEvolution()}if(state.year===200)togglePlay()}}
-    hydrology.animate(dt);updateParticles();controls.update();document.querySelector('.compass b').style.transform='rotate('+(-Math.atan2(camera.position.x-controls.target.x,camera.position.z-controls.target.z))+'rad)';renderer.render(scene,camera);captureFrame(now);
+    hydrology.animate(dt);updateParticles();controls.update();document.querySelector('.compass b').style.transform='rotate('+compassRotation(camera.position.x-controls.target.x,camera.position.z-controls.target.z)+'rad)';renderer.render(scene,camera);captureFrame(now);
   }requestAnimationFrame(animate);
 }catch(e){$('loading').textContent='Не удалось открыть карту: '+e.message;console.error(e)}}start();

@@ -26,3 +26,15 @@ export function flowFeatures(field){
   }
   return features;
 }
+
+// Signed water transport through the central north-south grid section.
+// u is eastward; no absolute values or forced downstream vectors.
+export function flowDirection(field){
+  const x=Math.floor(field.width/2);let discharge=0,area=0;
+  for(let y=0;y<field.height;y++){
+    const k=y*field.width+x;
+    if(field.mask[k]&&field.depth[k]>.05){const a=field.depth[k]*field.dy;area+=a;discharge+=a*field.u[k];}
+  }
+  const velocity=area?discharge/area:0;
+  return {discharge,area,velocity,sign:Math.abs(velocity)>1e-4?Math.sign(velocity):0};
+}

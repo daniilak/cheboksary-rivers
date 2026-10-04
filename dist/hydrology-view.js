@@ -1,15 +1,15 @@
 import * as THREE from 'three';
-import {seasonalScenario} from './hydrology.js';
-import {SedimentView} from './sediment-view.js?v=compact-1';
-import {WaveView} from './wave-view.js?v=compact-1';
-import {observeFlow,flowFeatures} from './flow-observations.js';
+import {seasonalScenario} from './hydrology.js?v=direction-1';
+import {SedimentView} from './sediment-view.js?v=direction-1';
+import {WaveView} from './wave-view.js?v=direction-1';
+import {observeFlow,flowFeatures,flowDirection} from './flow-observations.js?v=direction-1';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
 
 export class HydrologyView {
   constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
     Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
-    this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:.3,obstacles:true,playing:false,mode:'manual'};
+    this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:0,obstacles:true,playing:false,mode:'manual'};
     this.display='depth';this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
     const [w,s,e,n]=meta.bounds;
@@ -68,7 +68,7 @@ export class HydrologyView {
     $('seasonPlay').onclick=()=>this.toggleSeason();
     for(const button of document.querySelectorAll('[data-scenario]'))button.onclick=()=>{
       if(button.dataset.scenario==='base'){this.state.mode='manual';this.state.rise=0;this.state.discharge=2500;this.state.day=0;this.update();}
-      if(button.dataset.scenario==='spring'){this.state.peak=.3;this.applyDay(35);}
+      if(button.dataset.scenario==='spring'){this.state.peak=0;this.applyDay(35);}
       if(button.dataset.scenario==='extreme'){this.state.mode='manual';this.state.day=0;this.state.rise=3;this.state.discharge=10000;this.update();}
     };
     $('showBuildings').onchange=e=>{this.buildingMesh.visible=e.target.checked;};
@@ -134,6 +134,10 @@ export class HydrologyView {
     $('exposedCount').textContent=local(this.stats.buildingsNearWater);
     const d=field.diagnostics;
     $('velocityRange').textContent=d.maxSpeed.toFixed(2)+' м/с';
+    const direction=flowDirection(field);
+    $('flowDirection').textContent=field.wave?'Волновое движение':direction.sign>0?'Вниз по Волге → Новочебоксарск':direction.sign<0?'Вверх по Волге · обратный поток':'Течение устанавливается';
+    $('flowDirection').dataset.reverse=String(!field.wave&&direction.sign<0);
+    $('flowDirection').title=`Средний створ: Q = ${Math.round(direction.discharge)} м³/с; плюс — на восток. При подпоре и волнах возможен обратный поток.`;
     $('modelTime').textContent=`t = ${(d.time/3600).toFixed(2)} ч · ${field.running?'расчёт':'пауза'}`;
     $('flow2dStatus').textContent='';
     $('flowDetails').textContent=`${field.running?'Расчёт':'Пауза'} · ${(d.time/3600).toFixed(2)} ч · баланс ${(d.relativeBalanceError*100).toExponential(1)}% · Qвх ${Math.round((d.inletQ??0))} м³/с · Hвых ${d.outletLevel===null?'закрыт':d.outletLevel.toFixed(2)+' м'}`;
@@ -186,7 +190,7 @@ export class HydrologyView {
     $('flow2dStatus').textContent='Новая геометрия: запуск из покоя при исходном уровне…';
     this.flowTimer=setTimeout(()=>{
       try{
-        const worker=new Worker(new URL('./flow-worker.js?v=compact-1',import.meta.url),{type:'module'});this.flowWorker=worker;
+        const worker=new Worker(new URL('./flow-worker.js?v=direction-1',import.meta.url),{type:'module'});this.flowWorker=worker;
         worker.onmessage=({data})=>{
           if(worker!==this.flowWorker)return;
           if(data.waveError){$('waveStatus').textContent=data.waveError;return;}

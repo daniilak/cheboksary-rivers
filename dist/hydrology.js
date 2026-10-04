@@ -19,7 +19,7 @@ export function sectionHydraulics(width, depth, discharge, manning=.03) {
   return {area,radius,velocity,frictionSlope,froude:velocity/Math.sqrt(9.81*depth),unitDischarge:discharge/width};
 }
 
-export function seasonalScenario(day, peakRise=.3, baseQ=2500, peakQ=10000) {
+export function seasonalScenario(day, peakRise=0, baseQ=2500, peakQ=10000) {
   if(![day,peakRise,baseQ,peakQ].every(Number.isFinite)||day<0||day>120||peakRise<0||baseQ<0||peakQ<baseQ)throw Error('Invalid seasonal scenario');
   // An illustrative 120-day event, with a 35-day rise and slower recession. Not observations.
   const pulse=day<=35?Math.sin(Math.PI/2*day/35)**2:Math.cos(Math.PI/2*(day-35)/85)**2;
