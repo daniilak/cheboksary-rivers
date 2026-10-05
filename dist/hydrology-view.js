@@ -3,6 +3,7 @@ import {seasonalScenario} from './hydrology.js?v=direction-1';
 import {SedimentView} from './sediment-view.js?v=direction-1';
 import {WaveView} from './wave-view.js?v=direction-1';
 import {observeFlow,flowFeatures,flowDirection} from './flow-observations.js?v=direction-1';
+import {WaterSurface} from './water-surface.js?v=water-1';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
 
@@ -10,7 +11,7 @@ export class HydrologyView {
   constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
     Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
     this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:0,obstacles:true,playing:false,mode:'manual'};
-    this.display='depth';this.group=new THREE.Group();world.add(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
+    this.display='water';this.group=new THREE.Group();world.add(this.group);this.waterSurface=new WaterSurface(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
     const [w,s,e,n]=meta.bounds;
     this.cellX=(e-w)*111320*Math.cos((s+n)*Math.PI/360)/(meta.width-1);
@@ -105,25 +106,16 @@ export class HydrologyView {
     this.flowField=field;this.state.playing=field.running;this.sync();
     this.sediments.receive(field);
     const waveLimit=field.wave?Math.max(.05,field.wave.event.raised,-field.wave.event.lowered):0;
-    $('mapLegend').textContent=this.display==='wave'?(field.wave?`Синий − / оранжевый + · ±${waveLimit.toFixed(2)} м`:'Нет волны · глубина'):this.display==='change'?`Красный − / синий + · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Ниже / выше порога':'Светлее — мельче · темнее — глубже';
+    $('mapLegend').textContent=this.display==='water'?'Прозрачное мелководье · рябь и блики':this.display==='wave'?(field.wave?`Синий − / оранжевый + · ±${waveLimit.toFixed(2)} м`:'Нет волны · глубина'):this.display==='change'?`Красный − / синий + · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Ниже / выше порога':'Светлее — мельче · темнее — глубже';
     if(this.renderedGridKey!==this.geometryKey||field.sediment){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
-    const positions=[],colors=[],cells=[],[west,south,east,north]=field.bounds;
     const a=new THREE.Color('#83c9cd'),b=new THREE.Color('#08788f');
-    for(let k=0;k<field.mask.length;k++){
-      if(!field.mask[k]||field.depth[k]<=.05)continue;
-      const [x,z]=this.xy(west+(k%field.width+.5)/field.width*(east-west),north-(Math.floor(k/field.width)+.5)/field.height*(north-south));
-      const hx=field.dx*.0005,hz=field.dy*.0005,y=this.y(field.eta[k])+.0002;
-      positions.push(x-hx,y,z-hz,x+hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z-hz,x+hx,y,z+hz,x-hx,y,z+hz);
-      cells.push(k);let color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));
+    this.floodMesh=this.waterSurface.update(field,this.xy,z=>this.y(z),k=>{
+      let color=a.clone().lerp(b,Math.min(1,field.depth[k]/4));
       if(this.display==='wave'&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
-      color=this.sediments.color(k,field,color);
-      for(let i=0;i<6;i++)color.toArray(colors,colors.length);
-    }
-    if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();}
-    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    this.floodMesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));this.floodMesh.userData.cells=cells;this.group.add(this.floodMesh);
+      return this.sediments.color(k,field,color);
+    },this.display!=='water');
     const color=this.buildingMesh.geometry.attributes.color,dry=new THREE.Color('#c1bba6'),wet=new THREE.Color('#e27c46');
     for(let i=0;i<this.ranges.length;i++){
       if(this.coloredBuildings&&previous[i].exposed===this.exposure[i].exposed)continue;
@@ -171,6 +163,7 @@ export class HydrologyView {
   }
   animate(dt){
     if(!this.group.visible)return;
+    this.waterSurface.animate(dt,this.state.playing);
     this.flow.visible=!!this.flowField;
     if(this.flowField&&this.fieldTracers)this.animate2D(dt);
   }
@@ -185,7 +178,7 @@ export class HydrologyView {
       this.flowTimer=setTimeout(()=>this.flowWorker.postMessage({type:'parameters',parameters:this.flowParameters(),running:this.requestedRunning}),200);return;
     }
     this.geometryKey=geometryKey;this.flowWorker?.terminate();this.flowWorker=null;this.flowField=null;this.fieldTracers=null;
-    if(this.floodMesh){this.group.remove(this.floodMesh);this.floodMesh.geometry.dispose();this.floodMesh.material.dispose();this.floodMesh=null;}
+    this.waterSurface.reset();this.floodMesh=null;
     this.onLevel(this.data.baseline);$('exportScenario').disabled=true;$('waveLaunch').disabled=true;
     $('flow2dStatus').textContent='Новая геометрия: запуск из покоя при исходном уровне…';
     this.flowTimer=setTimeout(()=>{
