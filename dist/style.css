@@ -38,3 +38,6 @@ body.sediment-mode .season-controls,body.sediment-mode #riverControls>.model-not
 #hydroPane .hydro-notes:has(#hydroStatus:empty),#flow2dStatus:empty,#waveStatus:empty,#waveTime:empty{display:none}.flow2d-controls:has(#flow2dStatus:empty){display:none}#wavePanel{border:0}#sedimentPanel{padding-bottom:0;border:0}#hydroSidebar details{margin:4px 0;padding:11px 0}.hydro-head{align-items:center}.hydro-head .presets{margin:0}.simulation-actions{margin-bottom:10px}.hydro-console{padding:12px 18px}.live-diagnostics{margin:18px 0}.live-diagnostics summary{font-size:14px}#info .live-diagnostics p{font-size:13px}.hydro-notes{border:0;padding:0;margin:4px 0;color:#a15935}.hydro-notes:has(#hydroStatus:not(:empty)){display:block!important}
 
 .flow-direction{display:block;font-size:11px;color:#38695c;margin-top:4px}.flow-direction[data-reverse="true"]{color:#a15935}
+
+.scale-help{font-size:11px;line-height:1.5;color:#647c70}.height-scale-notice{position:absolute;right:24px;top:112px;max-width:220px;padding:8px 11px;border:1px solid #c9ae86;border-radius:5px;background:#fbf4e7ed;color:#855e30;font-size:11px}.height-scale-notice[hidden]{display:none}
+@media(max-width:700px){.height-scale-notice{right:12px;top:100px;max-width:170px;font-size:10px}}
