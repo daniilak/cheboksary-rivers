@@ -27,6 +27,10 @@ jobs:
       - name: Validate map and animation
         run: |
           node --check dist/app.js
+          node --check dist/transport-view.js
+          node --check dist/transport-worker.js
+          node --check dist/transport-import.js
+          node scripts/check-transport.mjs
           node --check dist/hydrology-view.js
           node --check dist/water-surface.js
           node scripts/check-water-surface.mjs
