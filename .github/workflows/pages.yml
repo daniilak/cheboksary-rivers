@@ -31,6 +31,7 @@ jobs:
           node --check dist/transport-worker.js
           node --check dist/transport-import.js
           node scripts/check-transport.mjs
+          node scripts/check-performance.mjs
           node --check dist/hydrology-view.js
           node --check dist/water-surface.js
           node scripts/check-water-surface.mjs

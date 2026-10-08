@@ -36,7 +36,7 @@ export class WaveView{
     const [x,z]=this.view.xy(...s.source);let elevation=this.view.data.baseline;
     if(f){const [w,b,e,n]=f.bounds,col=Math.floor((s.source[0]-w)/(e-w)*f.width),row=Math.floor((n-s.source[1])/(n-b)*f.height);elevation=f.eta[row*f.width+col]||elevation;}
     this.marker.position.set(x,this.view.y(elevation)+.075,z);this.marker.scale.setScalar(s.radius/1000);
-    this.gaugeMarkers.forEach((marker,i)=>{marker.visible=this.active&&!!f?.wave;if(marker.visible){const g=f.wave.gauges[i],[gx,gz]=this.view.xy(...g.resolvedCoordinates);marker.position.set(gx,this.view.y(f.eta[g.cell])+.08,gz);}});
+    this.gaugeMarkers.forEach((marker,i)=>{marker.visible=this.active&&!!f?.wave;if(marker.visible){const g=f.wave.gauges[i],[gx,gz]=this.view.xy(...g.resolvedCoordinates);marker.position.set(gx,this.view.y(f.eta[g.cell])+.08,gz);}});this.view.onChange?.();
   }
   pick(ray){
     if(!this.active||!this.picking)return false;

@@ -1,9 +1,12 @@
 import * as THREE from 'three';
-import {TransportView} from './transport-view.js?v=1';
+import {TransportView} from './transport-view.js?v=2';
+import {DemandFrames} from './frame-policy.js';
 import {TerrainEvolution} from './erosion.js';
-import {HydrologyView} from './hydrology-view.js?v=water-1';
+import {HydrologyView} from './hydrology-view.js?v=performance-2';
 import {OrbitControls} from './vendor/OrbitControls.js';
 const $=id=>document.getElementById(id);
+let frames,opaqueDirty=true,profiling=false,mapVisible=true;
+const invalidate=()=>{frames?.invalidate();opaqueDirty=true;};
 const state={mode:'hydrology',selected:-1,exag:1,flow:1,sed:.6,year:0,lab:true,playing:true,top:false,evolving:false,compare:false};
 const fmt=n=>(n/1000).toLocaleString('ru-RU',{maximumFractionDigits:1});
 let world,surfaceMask,scene,camera,renderer,controls,terrain,riverGroup,boundaryGroup,waterGroup,baseGroup,particles,meta,heights,rivers,boundary,waters,paths=[],lastLab=-1;
@@ -16,25 +19,25 @@ function point(lon,lat,lift=.025){const [x,z]=xy(lon,lat);return v3(x,(sample(lo
 function ringContains(p,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const a=ring[i],b=ring[j];if(((a[1]>p[1])!==(b[1]>p[1]))&&(p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0]))inside=!inside}return inside}
 function inCity(p){return boundary.coordinates.some(poly=>ringContains(p,poly[0])&&!poly.slice(1).some(r=>ringContains(p,r)))}
 function clear(group){while(group.children.length){const c=group.children[0];group.remove(c);c.geometry?.dispose();if(Array.isArray(c.material))c.material.forEach(m=>m.dispose());else c.material?.dispose()}}
-function initScene(){scene=new THREE.Scene();scene.background=new THREE.Color('#e7ece3');world=new THREE.Group();scene.add(world);scene.fog=new THREE.Fog('#e7ece3',85,170);camera=new THREE.PerspectiveCamera(36,1,.02,180);renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.9;$('scene').append(renderer.domElement);controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.maxPolarAngle=Math.PI*.485;controls.minDistance=1;controls.maxDistance=65;scene.add(new THREE.HemisphereLight(0xf9fff2,0x6f8978,1.5));const sun=new THREE.DirectionalLight(0xfff5d4,2.1);sun.position.set(-12,23,-8);scene.add(sun);const fill=new THREE.DirectionalLight(0xa2dce1,.7);fill.position.set(10,4,8);scene.add(fill);riverGroup=new THREE.Group();boundaryGroup=new THREE.Group();waterGroup=new THREE.Group();baseGroup=new THREE.Group();world.add(riverGroup,boundaryGroup,waterGroup,baseGroup);const observer=new ResizeObserver(resize);for(const id of ['viewport','hydroPane','erosionPane','transportPane'])observer.observe($(id));resize()}
-function resize(){if(!renderer||recording)return;const pane=$(transport?.active?'transportPane':state.mode==='hydrology'?'hydroPane':'erosionPane');const reserved=pane&&!pane.hidden?pane.getBoundingClientRect().height+26:0;$('scene').style.bottom=reserved+'px';const r=$('scene').getBoundingClientRect();if(r.height<1||r.width<1)return;camera.aspect=r.width/r.height;camera.clearViewOffset();camera.updateProjectionMatrix();renderer.setSize(r.width,r.height)}
+function initScene(){frames=new DemandFrames();profiling=new URLSearchParams(location.search).has('profile');for(const event of ['input','change','click'])document.addEventListener(event,invalidate);document.addEventListener('visibilitychange',invalidate);scene=new THREE.Scene();scene.background=new THREE.Color('#e7ece3');world=new THREE.Group();scene.add(world);scene.fog=new THREE.Fog('#e7ece3',85,170);camera=new THREE.PerspectiveCamera(36,1,.02,180);renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.9;$('scene').append(renderer.domElement);renderer.domElement.addEventListener('webglcontextrestored',()=>{if(hydrology)hydrology.waterSurface.backgroundValid=false;invalidate();});controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.addEventListener('change',invalidate);new IntersectionObserver(([entry])=>{mapVisible=entry.isIntersecting;invalidate();}).observe($('viewport'));controls.maxPolarAngle=Math.PI*.485;controls.minDistance=1;controls.maxDistance=65;scene.add(new THREE.HemisphereLight(0xf9fff2,0x6f8978,1.5));const sun=new THREE.DirectionalLight(0xfff5d4,2.1);sun.position.set(-12,23,-8);scene.add(sun);const fill=new THREE.DirectionalLight(0xa2dce1,.7);fill.position.set(10,4,8);scene.add(fill);riverGroup=new THREE.Group();boundaryGroup=new THREE.Group();waterGroup=new THREE.Group();baseGroup=new THREE.Group();world.add(riverGroup,boundaryGroup,waterGroup,baseGroup);const observer=new ResizeObserver(resize);for(const id of ['viewport','hydroPane','erosionPane','transportPane'])observer.observe($(id));resize()}
+function resize(){invalidate();if(!renderer||recording)return;const pane=$(transport?.active?'transportPane':state.mode==='hydrology'?'hydroPane':'erosionPane');const reserved=pane&&!pane.hidden?pane.getBoundingClientRect().height+26:0;$('scene').style.bottom=reserved+'px';const r=$('scene').getBoundingClientRect();if(r.height<1||r.width<1)return;camera.aspect=r.width/r.height;camera.clearViewOffset();camera.updateProjectionMatrix();renderer.setSize(r.width,r.height)}
 let displayedFlowGrid=null;
 function displayElevation(k){
   if(state.mode==='hydrology'&&displayedFlowGrid){const f=displayedFlowGrid,x=Math.floor((k%meta.width+.5)*f.width/meta.width),y=Math.floor((Math.floor(k/meta.width)+.5)*f.height/meta.height),cell=y*f.width+x;if(f.river[cell])return f.bed[cell];if(f.mask[cell]&&f.sediment)return heights[k]+f.sediment.change[cell];}
   return volgaMask?.[k]?hydroData.baseline-.2:heights[k];
 }
 function setHydraulicBed(field){
-  displayedFlowGrid=field;if(!terrain)return;
-  const positions=terrain.geometry.attributes.position,colors=terrain.geometry.attributes.color,tint=new THREE.Color();
+  invalidate();displayedFlowGrid=field;if(!terrain)return;
+  const positions=terrain.geometry.attributes.position,colors=terrain.geometry.attributes.color,tint=new THREE.Color();let moved=false;
   for(let k=0;k<heights.length;k++){
-    positions.setY(k,(displayElevation(k)-meta.min)*scale*12);
+    const height=Math.fround((displayElevation(k)-meta.min)*scale*12);if(positions.getY(k)!==height){positions.setY(k,height);moved=true;}
     if(state.mode==='hydrology'&&baseColors){
       tint.fromArray(baseColors,k*3);
       if(field?.sediment&&hydrology?.sediments?.active){const x=Math.floor((k%meta.width+.5)*field.width/meta.width),y=Math.floor((Math.floor(k/meta.width)+.5)*field.height/meta.height),cell=y*field.width+x;if(field.mask[cell]&&Math.abs(field.sediment.change[cell])>1e-9)tint.copy(hydrology.sediments.color(cell,field,tint));}
       colors.setXYZ(k,tint.r,tint.g,tint.b);
     }
   }
-  colors.needsUpdate=true;positions.needsUpdate=true;terrain.geometry.computeVertexNormals();terrain.geometry.computeBoundingSphere();
+  colors.needsUpdate=true;if(moved){positions.needsUpdate=true;terrain.geometry.computeVertexNormals();terrain.geometry.computeBoundingSphere();}
 }
 function buildTerrain(){if(terrain){world.remove(terrain);terrain.geometry.dispose();terrain.material.dispose()}clear(baseGroup);const w=meta.width,h=meta.height;const geometry=new THREE.PlaneGeometry(width,depth,w-1,h-1);geometry.rotateX(-Math.PI/2);const pos=geometry.attributes.position;const colors=new Float32Array(w*h*3);const low=new THREE.Color('#577960'),high=new THREE.Color('#b6b788'),outside=new THREE.Color('#c7cfb8');const [west,south,east,north]=meta.bounds;for(let j=0;j<h;j++){for(let i=0;i<w;i++){const k=j*w+i,alt=heights[k],lon=west+i/(w-1)*(east-west),lat=north-j/(h-1)*(north-south);pos.setY(k,(displayElevation(k)-meta.min)*scale*12);const c=low.clone().lerp(high,Math.pow((alt-meta.min)/(meta.max-meta.min),.8));if(surfaceMask[k]===0)c.lerp(outside,.85);if(surfaceMask[k]===2)c.set('#9ba583');const contour=surfaceMask[k]===2?1:((alt%20)<1.1)? .9:1;c.multiplyScalar(contour);c.toArray(colors,k*3)}}baseColors=colors.slice();geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));geometry.computeVertexNormals();terrain=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.95,metalness:0,side:THREE.DoubleSide}));world.add(terrain);
 // Vertical sides keep the real sampled profile, revealing the terrain block.
@@ -69,7 +72,7 @@ function updateParticles(){if(!particles||!paths.length)return;const arrows=part
 function frame(){let center=v3(0,.6,0),span=Math.max(width,depth);if(state.selected>=0){const box=new THREE.Box3();rivers[state.selected].segments.flat().forEach(p=>box.expandByPoint(point(...p)));center=box.getCenter(new THREE.Vector3());const size=box.getSize(new THREE.Vector3());span=Math.max(size.x,size.z,1.5)*1.5}const distance=span/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2)))*Math.max(1,1/camera.aspect)*1.03;center.y*=state.exag/12;controls.target.copy(center);if(state.top){camera.position.copy(center).add(v3(0,distance,.001))}else{camera.position.copy(center).add(v3(span*.15,distance*.64,distance*.82))}controls.update()}
 function select(index){if(!Number.isInteger(index)||index< -1||index>=rivers.length)throw Error('Неизвестная река');state.selected=index;state.lab=true;state.year=0;state.evolving=false;state.compare=false;syncLab();document.querySelectorAll('.river').forEach(b=>b.classList.toggle('active',Number(b.dataset.river)===index));const r=rivers[index];$('title').textContent=r?r.name:'Чебоксары';$('subtitle').textContent=r?`${fmt(r.length)} км ${r.name==='Волга'?'вдоль города':'в границах города'}`:'Рельеф, долины и водотоки';$('statLabel').textContent=r?'Длина в городе, км':'Именованных рек';$('riverCount').textContent=r?fmt(r.length):rivers.filter(r=>r.name!=='Безымянные ручьи').length;$('console-title').textContent=r?'Течение в городской долине':'Вода следует рельефу';$('experiment').disabled=false;applyEvolution();frame()}
 function syncLab(){document.body.classList.toggle('lab',state.mode==='erosion');$('lab-controls').hidden=false;$('experiment').textContent='Сброс';$('mode-label').textContent='УСЛОВНАЯ МОДЕЛЬ';$('year').value=state.year;$('yearValue').textContent=Math.round(state.year);$('play').textContent=state.evolving?'Ⅱ':'▶';$('play').setAttribute('aria-label',state.evolving?'Приостановить годы':'Запустить годы');$('compare').classList.toggle('active',state.compare);$('compare').setAttribute('aria-pressed',String(state.compare));}
-function applyEvolution(){
+function applyEvolution(){invalidate();
   if(!evolution)return;const previous=evolution.changed.slice(),reaches=[];
   if(state.mode==='erosion'&&!state.compare&&state.year>0)rivers.forEach((r,ri)=>{if(state.selected>=0&&state.selected!==ri)return;for(const [si,raw] of r.segments.entries()){const attrs=r.segmentAttributes?.[si]||{};if(attrs.tunnel&&attrs.tunnel!=='no'||attrs.covered==='yes')continue;const original=densify(raw);reaches.push({original,levels:riverLevels(original),moved:deformed(original,ri),volga:r.name==='Волга'})}});
   heights=evolution.apply(reaches,state.compare?0:state.year,state.sed);
@@ -79,6 +82,7 @@ function applyEvolution(){
 function setYear(value){state.year=THREE.MathUtils.clamp(value,0,200);state.lab=true;syncLab();applyEvolution();lastLab=Math.floor(state.year)}
 function focusBend(){if(state.selected<0)select(rivers.findIndex(r=>r.name==='Сугутка'));let best=null,score=-1;for(const raw of rivers[state.selected].segments){const seg=densify(raw);for(let i=8;i<seg.length-8;i++){const a=xy(...seg[i-8]),p=xy(...seg[i]),b=xy(...seg[i+8]);const bend=Math.hypot(p[0]-(a[0]+b[0])/2,p[1]-(a[1]+b[1])/2);if(bend>score){score=bend;best=seg[i]}}}if(!best){frame();return}const center=point(...best);center.y*=state.exag/12;controls.target.copy(center);const dist=rivers[state.selected].name==='Волга'?5:3.2;camera.position.copy(center).add(state.top?v3(0,dist,.001):v3(dist*.32,dist*.8,dist*.85));controls.update()}
 function setExag(value){
+  invalidate();
   state.exag=value;$('exag').value=value;$('exagValue').textContent=value===1?'1:1':value+'×';world.scale.y=value/12;
   $('heightScaleNotice').hidden=value===1;
   $('heightScaleNotice').textContent=value===1?'':'Высоты увеличены ×'+value;
@@ -132,12 +136,25 @@ async function start(){try{
   evolution=new TerrainEvolution(meta,heights);if(heights.length!==meta.width*meta.height)throw Error('Неполная сетка высот');
   const [w,s,e,n]=meta.bounds;lon0=(w+e)/2;lat0=(s+n)/2;width=(e-w)*111320*Math.cos(lat0*Math.PI/180)*scale;depth=(n-s)*111320*scale;
   initScene();buildTerrain();buildBoundary();buildWater();
-  hydrology=new HydrologyView({world,meta,dem:evolution.base,seeds:volgaMask,barriers:new Uint8Array(responses[7]),surfaceMask,buildings:responses[6],data:hydroData,xy,onBed:setHydraulicBed,onWaveFocus:(p,radius)=>{const center=point(...p);center.y*=state.exag/12;const distance=Math.max(3,radius/1000*6);controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,distance,.001):v3(distance*.28,distance*.8,distance*.85));controls.update();},onFocus:b=>{const coords=b.geometry.coordinates[0];const lon=coords.reduce((a,p)=>a+p[0],0)/coords.length,lat=coords.reduce((a,p)=>a+p[1],0)/coords.length;const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,1.6,.001):v3(.5,1.3,1.4));controls.update();},onLevel:level=>{for(const mesh of waterGroup.children)if(mesh.userData.volga){mesh.visible=level!==null;if(level!==null)mesh.position.y=(level-hydroData.baseline)*.012;}}});
+  hydrology=new HydrologyView({world,meta,dem:evolution.base,seeds:volgaMask,barriers:new Uint8Array(responses[7]),surfaceMask,buildings:responses[6],data:hydroData,xy,onBed:setHydraulicBed,onChange:invalidate,onWaveFocus:(p,radius)=>{const center=point(...p);center.y*=state.exag/12;const distance=Math.max(3,radius/1000*6);controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,distance,.001):v3(distance*.28,distance*.8,distance*.85));controls.update();},onFocus:b=>{const coords=b.geometry.coordinates[0];const lon=coords.reduce((a,p)=>a+p[0],0)/coords.length,lat=coords.reduce((a,p)=>a+p[1],0)/coords.length;const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,1.6,.001):v3(.5,1.3,1.4));controls.update();},onLevel:level=>{for(const mesh of waterGroup.children)if(mesh.userData.volga){mesh.visible=level!==null;if(level!==null)mesh.position.y=(level-hydroData.baseline)*.012;}}});
   wire();setExag(state.exag);select(-1);setMode('hydrology');$('loading').hidden=true;webMCP();
-  transport=new TransportView({world,point,camera,controls,focus:(lon=47.25,lat=56.125,dist=17)=>{const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,dist,.001):v3(dist*.15,dist*.75,dist*.8));controls.update();},onMode:active=>{if(active)hydrology.setRunning(false);$('hydroPane').hidden=active;resize();}});
+  transport=new TransportView({world,point,camera,controls,onChange:()=>frames.invalidate(),focus:(lon=47.25,lat=56.125,dist=17)=>{const center=point(lon,lat);center.y*=state.exag/12;controls.target.copy(center);camera.position.copy(center).add(state.top?v3(0,dist,.001):v3(dist*.15,dist*.75,dist*.8));controls.update();},onMode:active=>{if(active)hydrology.setRunning(false);invalidate();$('hydroPane').hidden=active;resize();}});
   transport.setActive(true);transport.init();
-  let last=performance.now();function animate(now){requestAnimationFrame(animate);const dt=Math.max(0,Math.min((now-last)/1000,.05));last=now;
-    if(state.playing){time+=dt;if(state.mode==='erosion'&&state.evolving&&!recording){state.year=Math.min(200,state.year+dt*5);$('year').value=state.year;$('yearValue').textContent=Math.round(state.year);if(Math.floor(state.year)!==lastLab){lastLab=Math.floor(state.year);applyEvolution()}if(state.year===200)togglePlay()}}
-    transport?.animate(dt);hydrology.animate(dt);updateParticles();controls.update();document.querySelector('.compass b').style.transform='rotate('+compassRotation(camera.position.x-controls.target.x,camera.position.z-controls.target.z)+'rad)';hydrology.waterSurface.render(renderer,scene,camera);captureFrame(now);
+  const compass=document.querySelector('.compass b');let last=performance.now();
+  function animate(now){
+    requestAnimationFrame(animate);const dt=Math.max(0,Math.min((now-last)/1000,.05));last=now;
+    if(document.hidden||(!mapVisible&&!recording))return;
+    const waterRunning=!transport.active&&hydrology.group.visible&&hydrology.state.playing;
+    const riverRunning=!transport.active&&state.playing&&(state.mode==='erosion'||waterRunning);
+    const animated=!!recording||transport.active&&transport.playing||waterRunning||riverRunning;
+    controls.update();if(!frames.consume(animated))return;
+    if(riverRunning){time+=dt;if(state.mode==='erosion'&&state.evolving&&!recording){state.year=Math.min(200,state.year+dt*5);$('year').value=state.year;$('yearValue').textContent=Math.round(state.year);if(Math.floor(state.year)!==lastLab){lastLab=Math.floor(state.year);applyEvolution()}if(state.year===200)togglePlay()}}
+    transport.animate(dt);hydrology.animate(dt);updateParticles();
+    compass.style.transform='rotate('+compassRotation(camera.position.x-controls.target.x,camera.position.z-controls.target.z)+'rad)';
+    hydrology.waterSurface.render(renderer,scene,camera,{backgroundDirty:opaqueDirty||riverRunning||waterRunning,overlays:transport.active?[transport.group]:[]});opaqueDirty=false;captureFrame(now);
+    if(profiling){const m=renderer.domElement.dataset;m.frames=String((Number(m.frames)||0)+1);m.geometries=String(renderer.info.memory.geometries);}
+    // Changes made during this rendered frame are already visible.
+    frames.dirty=false;
   }requestAnimationFrame(animate);
+
 }catch(e){$('loading').textContent='Не удалось открыть карту: '+e.message;console.error(e)}}start();

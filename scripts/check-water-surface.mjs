@@ -39,8 +39,11 @@ water.render(renderer,{},camera);assert.equal(passes.length,1,'Diagnostics shoul
 passes.length=0;water.update(field,xy,elevation,tint,false);water.render(renderer,{},camera);
 assert.equal(passes.length,2);assert.equal(passes[0].visible,false);assert.equal(passes[1].visible,true);
 assert.equal(target,null);assert.equal(water.material.uniforms.uResolution.value.x,640);
+passes.length=0;const overlay=new THREE.Group();
+water.render(renderer,{},camera,{backgroundDirty:false,overlays:[overlay]});assert.equal(passes.length,1,'Unchanged terrain needs only the foreground pass');assert.equal(overlay.visible,true);
+passes.length=0;water.render(renderer,{},camera,{backgroundDirty:true,overlays:[overlay]});assert.equal(passes.length,2,'Camera or scene changes must refresh refraction');assert.equal(overlay.visible,true);
 passes.length=0;renderer.render=()=>{throw Error('render failed');};
-assert.throws(()=>water.render(renderer,{},camera));assert.equal(mesh.visible,true);assert.equal(target,null);
+assert.throws(()=>water.render(renderer,{},camera,{overlays:[overlay]}));assert.equal(mesh.visible,true);assert.equal(overlay.visible,true);assert.equal(water.backgroundValid,false);assert.equal(target,null);
 water.reset();assert.equal(group.children.length,0);assert.equal(water.mesh,null);assert.equal(water.time,0);
 water.update({...field,depth:new Float32Array(6)},xy,elevation,tint,false);
 assert.equal(water.mesh.geometry.getAttribute('position').count,0,'Dry grid should have no water geometry');

@@ -1,3 +1,4 @@
+import {pointCount,pointValue} from './transport-replay.js';
 // Pure transport statistics. Seconds are relative to the GPS day's Moscow midnight.
 export function haversine(lon1,lat1,lon2,lat2){const r=Math.PI/180,a=lat1*r,b=lat2*r,h=Math.sin((b-a)/2)**2+Math.cos(a)*Math.cos(b)*Math.sin((lon2-lon1)*r/2)**2;return 12742000*Math.asin(Math.sqrt(Math.min(1,h)));}
 export function quantile(values,p){if(!values.length)return null;const a=[...values].sort((a,b)=>a-b),k=(a.length-1)*p,i=Math.floor(k);return a[i]+(a[Math.ceil(k)]-a[i])*(k-i);}
@@ -30,4 +31,17 @@ export function analyzeDay(day,filter={}){
  const curve=bins.map(b=>({time:b.time,vehicles:b.vehicles.size,speed:b.seconds?b.distance/b.seconds*3.6:null,hours:b.seconds/3600,coverage:b.vehicles.size>0}));const peak=curve.reduce((a,b)=>b.vehicles>a.vehicles?b:a,{time:from,vehicles:0});
  return {from,to,vehicles:fleet.size,points,vehicleHours:seconds/3600,distanceKm:distance/1000,speed:seconds?distance/seconds*3.6:null,slowShare:seconds?slow/seconds:null,coverage:curve.length?curve.filter(b=>b.coverage).length/curve.length:0,peak,curve,routes:rows,cells,intervals};
 }
-export function positionsAt(day,time,filter={},maxAge=120){const result=new Map();for(const tr of day.tracks){if(!matches(tr,filter)||!tr.points.length)continue;const p=tr.points;let l=0,r=p.length;while(l<r){const m=(l+r)>>1;if(p[m][0]<=time)l=m+1;else r=m;}const i=l-1;if(i<0)continue;const a=p[i];if(time-a[0]>maxAge)continue;let lon=a[1]/1e6,lat=a[2]/1e6;const b=p[i+1];if(b&&b[3]!==null&&b[0]-a[0]<=180){const f=(time-a[0])/(b[0]-a[0]);lon+=(b[1]-a[1])/1e6*f;lat+=(b[2]-a[2])/1e6*f;}if(result.has(tr.id)&&result.get(tr.id).age<=time-a[0])continue;result.set(tr.id,{id:tr.id,route:tr.route,number:tr.number,type:tr.type,lon,lat,speed:b&&b[3]!==null?b[3]:a[3],direction:a[4],age:time-a[0],lowFloor:tr.lowFloor});}return [...result.values()];}
+export function positionsAt(day,time,filter={},maxAge=120){
+ const result=new Map();
+ for(const tr of day.tracks){
+  const count=pointCount(tr);if(!matches(tr,filter)||!count)continue;
+  const value=(i,c)=>pointValue(tr,i,c);let l=0,r=count;
+  while(l<r){const m=(l+r)>>1;if(value(m,0)<=time)l=m+1;else r=m;}
+  const i=l-1;if(i<0)continue;const age=time-value(i,0);if(age>maxAge)continue;
+  if(result.has(tr.id)&&result.get(tr.id).age<=age)continue;
+  let lon=value(i,1)/1e6,lat=value(i,2)/1e6;const next=i+1<count,valid=next&&value(i+1,3)!==null;
+  if(valid&&value(i+1,0)-value(i,0)<=180){const f=age/(value(i+1,0)-value(i,0));lon+=(value(i+1,1)-value(i,1))/1e6*f;lat+=(value(i+1,2)-value(i,2))/1e6*f;}
+  result.set(tr.id,{id:tr.id,route:tr.route,number:tr.number,type:tr.type,lon,lat,speed:valid?value(i+1,3):value(i,3),direction:value(i,4),age,lowFloor:tr.lowFloor});
+ }
+ return [...result.values()];
+}

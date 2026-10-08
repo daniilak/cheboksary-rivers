@@ -128,13 +128,13 @@ const fragmentShader=`
 
 export class WaterSurface {
   constructor(group){
-    this.group=group;this.time=0;this.background=null;
+    this.group=group;this.time=0;this.background=null;this.backgroundValid=false;this.size=new THREE.Vector2();
     this.material=new THREE.ShaderMaterial({vertexShader,fragmentShader,vertexColors:true,side:THREE.DoubleSide,
       uniforms:{uTime:{value:0},uDiagnostic:{value:0},uHasBackground:{value:0},uResolution:{value:new THREE.Vector2(1,1)},
         uBackground:{value:null},uBackgroundDepth:{value:null},uNear:{value:.02},uFar:{value:180}}});
   }
   update(field,xy,elevation,colorAt,diagnostic){
-    const data=waterGeometry(field,xy,elevation,colorAt);
+    this.backgroundValid=false;const data=waterGeometry(field,xy,elevation,colorAt);
     if(!this.mesh){this.mesh=new THREE.Mesh(new THREE.BufferGeometry(),this.material);this.group.add(this.mesh);}
     const g=this.mesh.geometry;
     for(const [name,array,size] of [['position',data.positions,3],['color',data.colors,3],['waterDepth',data.depths,1],['waterVelocity',data.velocities,2]]){
@@ -147,21 +147,24 @@ export class WaterSurface {
     return this.mesh;
   }
   animate(dt,running){if(running)this.time+=dt;this.material.uniforms.uTime.value=this.time;}
-  reset(){if(this.mesh){this.group.remove(this.mesh);this.mesh.geometry.dispose();this.mesh=null;}this.time=0;}
-  render(renderer,scene,camera){
+  reset(){this.backgroundValid=false;if(this.mesh){this.group.remove(this.mesh);this.mesh.geometry.dispose();this.mesh=null;}this.time=0;}
+  render(renderer,scene,camera,{backgroundDirty=true,overlays=[]}={}){
     const mesh=this.mesh;
     if(!mesh?.visible||!this.group.visible||this.material.uniforms.uDiagnostic.value===1){renderer.render(scene,camera);return;}
-    const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+    const size=renderer.getDrawingBufferSize(this.size);
     if(!this.background){
       this.background=new THREE.WebGLRenderTarget(size.x,size.y,{depthBuffer:true});
-      this.background.depthTexture=new THREE.DepthTexture(size.x,size.y);
-    }else if(this.background.width!==size.x||this.background.height!==size.y)this.background.setSize(size.x,size.y);
+      this.background.depthTexture=new THREE.DepthTexture(size.x,size.y);this.backgroundValid=false;
+    }else if(this.background.width!==size.x||this.background.height!==size.y){this.background.setSize(size.x,size.y);this.backgroundValid=false;}
     const uniforms=this.material.uniforms;
     uniforms.uResolution.value.copy(size);uniforms.uNear.value=camera.near;uniforms.uFar.value=camera.far;
     const previous=renderer.getRenderTarget();
-    mesh.visible=false;
-    try{renderer.setRenderTarget(this.background);renderer.render(scene,camera);}
-    finally{mesh.visible=true;renderer.setRenderTarget(previous);}
+    if(backgroundDirty||!this.backgroundValid){
+      const visibility=overlays.map(group=>group.visible);mesh.visible=false;for(const group of overlays)group.visible=false;
+      this.backgroundValid=false;
+      try{renderer.setRenderTarget(this.background);renderer.render(scene,camera);this.backgroundValid=true;}
+      finally{mesh.visible=true;overlays.forEach((group,i)=>group.visible=visibility[i]);renderer.setRenderTarget(previous);}
+    }
     uniforms.uBackground.value=this.background.texture;uniforms.uBackgroundDepth.value=this.background.depthTexture;uniforms.uHasBackground.value=1;
     renderer.render(scene,camera);
   }

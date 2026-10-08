@@ -1,15 +1,16 @@
 import * as THREE from 'three';
+import {TerrainFieldCache} from './terrain-field-cache.js';
 import {seasonalScenario} from './hydrology.js?v=direction-1';
 import {SedimentView} from './sediment-view.js?v=direction-1';
-import {WaveView} from './wave-view.js?v=direction-1';
+import {WaveView} from './wave-view.js?v=performance-2';
 import {observeFlow,flowFeatures,flowDirection} from './flow-observations.js?v=direction-1';
-import {WaterSurface} from './water-surface.js?v=water-1';
+import {WaterSurface} from './water-surface.js?v=performance-2';
 const $=id=>document.getElementById(id);
 const local=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:2});
 
 export class HydrologyView {
-  constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed}) {
-    Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed});
+  constructor({world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed,onChange}) {
+    Object.assign(this,{world,meta,dem,seeds,barriers,surfaceMask,buildings,data,xy,onLevel,onFocus,onWaveFocus,onBed,onChange});this.bedCache=new TerrainFieldCache();
     this.state={sediment:{enabled:true,grainMm:1,grainFraction:.5,supply:1},rise:0,discharge:2500,depth:8,manning:.03,day:0,peak:0,obstacles:true,playing:false,mode:'manual'};
     this.display='water';this.group=new THREE.Group();world.add(this.group);this.waterSurface=new WaterSurface(this.group);this.use2D=true;this.flowField=null;this.flowKey=null;
     this.exposure=buildings.map(()=>({exposed:false,depth:0}));this.stats={};this.ranges=[];this.clock=0;this.selectedSection=40;this.selectedBuilding=-1;
@@ -107,7 +108,7 @@ export class HydrologyView {
     this.sediments.receive(field);
     const waveLimit=field.wave?Math.max(.05,field.wave.event.raised,-field.wave.event.lowered):0;
     $('mapLegend').textContent=this.display==='water'?'Прозрачное мелководье · рябь и блики':this.display==='wave'?(field.wave?`Синий − / оранжевый + · ±${waveLimit.toFixed(2)} м`:'Нет волны · глубина'):this.display==='change'?`Красный − / синий + · ±${(this.sediments.scale*1000).toFixed(3)} мм`:this.display==='mobility'?'Ниже / выше порога':'Светлее — мельче · темнее — глубже';
-    if(this.renderedGridKey!==this.geometryKey||field.sediment){this.onBed?.(field);this.renderedGridKey=this.geometryKey;}
+    if(this.bedCache.changed(field,this.geometryKey+'/'+this.display)||this.display==='mobility')this.onBed?.(field);this.tracersDirty=true;
     const previous=this.exposure;
     Object.assign(this,observeFlow(field,this.meta,this.surfaceMask,this.buildings));
     const a=new THREE.Color('#83c9cd'),b=new THREE.Color('#08788f');
@@ -116,12 +117,12 @@ export class HydrologyView {
       if(this.display==='wave'&&field.wave&&field.river[k]){const value=field.anomaly[k],limit=Math.max(.05,field.wave.event.raised,-field.wave.event.lowered);color=new THREE.Color('#8bc3c8').lerp(new THREE.Color(value<0?'#2459b8':'#f9a350'),Math.min(1,Math.abs(value)/limit));}
       return this.sediments.color(k,field,color);
     },this.display!=='water');
-    const color=this.buildingMesh.geometry.attributes.color,dry=new THREE.Color('#c1bba6'),wet=new THREE.Color('#e27c46');
+    let colorChanged=false;const color=this.buildingMesh.geometry.attributes.color,dry=new THREE.Color('#c1bba6'),wet=new THREE.Color('#e27c46');
     for(let i=0;i<this.ranges.length;i++){
       if(this.coloredBuildings&&previous[i].exposed===this.exposure[i].exposed)continue;
-      const [start,end]=this.ranges[i],c=this.exposure[i].exposed?wet:dry;for(let k=start;k<end;k++)color.setXYZ(k,c.r,c.g,c.b);
+      colorChanged=true;const [start,end]=this.ranges[i],c=this.exposure[i].exposed?wet:dry;for(let k=start;k<end;k++)color.setXYZ(k,c.r,c.g,c.b);
     }
-    this.coloredBuildings=true;color.needsUpdate=true;
+    this.coloredBuildings=true;if(colorChanged)color.needsUpdate=true;
     $('floodArea').textContent=local(this.stats.areaKm2)+' км²';$('cityFloodArea').textContent=`в границе города ${local(this.stats.cityAreaKm2)} км²`;
     $('exposedCount').textContent=local(this.stats.buildingsNearWater);
     const d=field.diagnostics;
@@ -136,7 +137,7 @@ export class HydrologyView {
     $('hydroStatus').textContent=d.ceilingReached?'Достигнут предел высот расчётной области — результат за пределами применимости':d.edgeWet?'Вода достигла закрытого края карты: область нужно расширить':'';
     $('flowCaption').textContent='Белые трассеры: рассчитанное 2D-поле, показ ×600 · песочные: направление OSM';
     this.waves.receive(field);if(this.group.visible)this.onLevel(null);$('exportScenario').disabled=false;this.drawSection();
-    if(this.selectedBuilding>=0)this.inspectBuilding(this.selectedBuilding);
+    if(this.selectedBuilding>=0)this.inspectBuilding(this.selectedBuilding);this.onChange?.();
   }
   drawHydrograph(){
     const points=Array.from({length:121},(_,d)=>{const v=seasonalScenario(d,this.state.peak);return `${d*2},${54-(v.discharge-2500)/7500*45}`;}).join(' ');
@@ -165,7 +166,7 @@ export class HydrologyView {
     if(!this.group.visible)return;
     this.waterSurface.animate(dt,this.state.playing);
     this.flow.visible=!!this.flowField;
-    if(this.flowField&&this.fieldTracers)this.animate2D(dt);
+    if(this.flowField&&this.fieldTracers&&(this.state.playing||this.tracersDirty)){this.animate2D(dt);this.tracersDirty=false;}
   }
   flowParameters(){return {sediment:{...this.state.sediment},baseline:this.data.baseline,depth:this.state.depth,rise:this.state.rise,discharge:this.state.discharge,manning:this.state.manning,obstacles:this.state.obstacles};}
   queue2D(){
