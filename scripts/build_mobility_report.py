@@ -2,7 +2,7 @@
 """Produce a small browser report, reviewable cards, exports and static report."""
 import html,json,math,statistics
 from collections import Counter,defaultdict
-from analyze_mobility import ROOT,RAW,OUT,STOPS,BOUNDS,WEIGHTS,DATES,PERIODS,write,export_csv,center
+from analyze_mobility import ROOT,RAW,OUT,STOPS,BOUNDS,WEIGHTS,DATES,PERIODS,write,export_csv,center,period,crossed_speed_ci
 from prepare_transport import distance
 
 SOURCES=[
@@ -13,7 +13,8 @@ SOURCES=[
  {'id':'schedule','name':'ЧТУ · расписание','url':'https://xn--21-qmces.xn--p1ai/raspis.html','date':'на странице расписание от 01.06.2026; проверено 09.10.2026','use':'Проверен официальный источник для последующего сопоставления рейсов.','limit':'Расписание представлено изображениями; ссылка Минтранса вернула HTTP 418. Машиночитаемый график на даты GPS не получен; опоздания относительно расписания не вычисляются.'},
  {'id':'population','name':'Чувашстат · население городского округа','url':'https://21.rosstat.gov.ru/folder/150392/document/265966','date':'оценка на 01.01.2025; проверено 09.10.2026','use':'Опубликовано около 507 тыс. жителей Чебоксарского городского округа; это контекст масштаба территории.','limit':'Не население вырезки и не распределение жителей по домам. Поисковая версия доступна, прямой запрос вернул 502. Жители не распределяются по остановкам; OSM-здания — только прокси потенциального спроса.'},
  {'id':'crashes','name':'Госавтоинспекция · статистика ДТП','url':'https://stat.gibdd.ru/','date':'попытка доступа 09.10.2026','use':'Проверена доступность официального источника.','limit':'Запрос завершился тайм-аутом; геокодированные ДТП не получены. Для всех карточек данные ДТП = нет данных; отсутствие аварий не утверждается.'},
- {'id':'standards','name':'Росстандарт · ГОСТ Р 70716-2023','url':'https://protect.gost.ru/gost/details/ec825dd5-abe3-4062-8a19-63ddf5cef45f','date':'введён 01.05.2023; статус «Действует» проверен 09.10.2026','use':'Основание включить проверку безопасности пешеходов в программу обследования.','limit':'Карточка стандарта не является экспертизой проекта. До проектирования проверить актуальные редакции и применимость ГОСТ Р 52289, СП 42.13330 и СП 59.13330, требования владельца дороги.'}]
+ {'id':'standards','name':'Росстандарт · ГОСТ Р 70716-2023','url':'https://protect.gost.ru/gost/details/ec825dd5-abe3-4062-8a19-63ddf5cef45f','date':'введён 01.05.2023; статус «Действует» проверен 09.10.2026','use':'Основание включить проверку безопасности пешеходов в программу обследования.','limit':'Карточка стандарта не является экспертизой проекта. До проектирования проверить актуальные редакции и применимость ГОСТ Р 52289, СП 42.13330 и СП 59.13330, требования владельца дороги.'},
+ {'id':'bootstrap','name':'Owen · The pigeonhole bootstrap','url':'https://arxiv.org/abs/0712.1111','date':'2007; проверено 09.10.2026','use':'В карточках скоростей дополнительно независимо пересэмплируются дни и ID машин, чтобы учитывать повторение одной машины между днями.','limit':'Применение к отношению суммарного пути и времени — анализ чувствительности, не точный доверительный интервал и не исправление пропущенного GPS.'}]
 LABELS={'benefit':'польза','safety':'безопасность','accessibility':'доступность','feasibility':'реализуемость','evidence':'доказательства'}
 def nearest(p):return min((i for i,s in enumerate(STOPS) if s['inMap'] and s['type']=='0'),key=lambda i:distance(p,(STOPS[i]['lon'],STOPS[i]['lat'])))
 def src(*ids):return [{'name':s['name'],'url':s['url']} for s in SOURCES if s['id'] in ids]
@@ -30,17 +31,26 @@ def main():
   if tuple(v['cell']) in seen:continue
   seen.add(tuple(v['cell']));selected.append(v)
   if len(selected)==4:break
- for v in selected:
+ crossed_rows=[[] for _ in selected]
+ for date in sorted(set(d for v in selected for d in v['days'])):
+  raw=json.loads((RAW/'mobility'/(date+'.json')).read_text())
+  for route,rid,vid,time,seconds,meters,x,y,direction,near in raw['segments']:
+   if near is not None or not 7*3600<=time-seconds<time<21*3600:continue
+   for j,v in enumerate(selected):
+    if date in v['days'] and [x,y]==v['cell'] and route==v['route'] and direction==v['direction'] and period(time)==v['period']:crossed_rows[j].append((date,vid,seconds,meters))
+ for j,v in enumerate(selected):
+  v['crossedSpeedSensitivity']=crossed_speed_ci(crossed_rows[j])
   p=(v['lon'],v['lat']);i=nearest(p);s=STOPS[i];ci=v['speedCI'];nearrows=[z for z in t['segments'] if z['cell']==v['cell'] and z['route']==v['route'] and z['kind']==v['kind'] and z['period']==v['period'] and z['direction']!=v['direction'] and len(z['days'])>=5 and z['location']==v['location']]
   contrasts=[f"Другой курс {['С','В','Ю','З'][z['direction']]}: {z['speed']:.1f} км/ч, {len(z['days'])} дней (состав сегментов может различаться)." for z in nearrows[:2]]
   card('Замедление: '+s['name'],p,'подтверждённое наблюдение','Повторяется малая скорость наблюдаемого транспорта на участке сетки 250 м; причина не установлена.',
    [f"{v['route']}, курс {['С','В','Ю','З'][v['direction']]}, {v['period']} ({PERIODS[v['period']][0]}–{PERIODS[v['period']][1]} МСК), будни. Средняя {v['speed']:.1f} км/ч, 95% ДИ по дням {ci[0]:.1f}–{ci[1]:.1f}; P10/P50/P90 {v['p10']:.1f}/{v['median']:.1f}/{v['p90']:.1f}.",
-    f"{len(v['days'])} дней, {v['vehicles']} машин, {v['n']} сегментов; {v['slowDays']} дней со средней <12 км/ч. Доля времени <5 км/ч {v['slowShare']*100:.1f}%. Даты: {', '.join(v['days'])}."]+contrasts,
+    f"{len(v['days'])} дней, {v['vehicles']} машин, {v['n']} сегментов; {v['slowDays']} дней со средней <12 км/ч. Доля времени <5 км/ч {v['slowShare']*100:.1f}%. Даты: {', '.join(v['days'])}.",
+    f"Чувствительность к двум зависимостям (день × ID машины, 300 повторов): центральный 95% диапазон {v['crossedSpeedSensitivity']} км/ч. Одна машина сохраняет общий вес во всех днях; это не точный ДИ." ]+contrasts,
    'Обследовать задержки; при подтверждении светофорной причины рассмотреть транспортный приоритет, настройку фаз или организацию подхода к остановке.',
    'Уменьшение повторяющихся задержек может улучшить время поездки и регулярность. Эффект в минутах не рассчитан.',
    'Середина сегмента вне радиуса 70 м не исключает стоянку на части сегмента. GPS не измеряет загрузку всей дороги. Клетка может содержать несколько улиц; ближайшая остановка — ориентир. Терминальные клетки отсеяны, остаточная стоянка возможна.',
    'Проехать с журналом открытия дверей; измерить очереди и задержки по фазам, контрольное время движения, фактическую полосу и остановку. Сверить маршрут и график с оператором.',
-   [4,3,3,3,4],src('gps','stops','routes'),stop=i,type='speed',metric=v)
+   [4,3,3,3,4],src('gps','stops','routes','bootstrap'),stop=i,type='speed',metric=v)
  head=[v for v in t['intervals'] if v['kind']=='будний' and v['n']>=80 and len(v['days'])>=10 and v['cv']>=.8 and v['p90']>=15]
  seen_routes=set()
  for v in sorted(head,key=lambda x:-x['n']):
@@ -141,7 +151,8 @@ def main():
  for c in candidates:
   if c['type']=='headway' and c['metric'] not in interval_table:interval_table.append(c['metric'])
  table.sort(key=lambda v:v['speed']);interval_table.sort(key=lambda v:-v['n'])
- limits=t['limits']+access['method']['limits']+['Число OSM-объектов не равно числу учреждений: территории и корпуса могут дублироваться. Население по зданиям, рабочие места, пассажиропотоки, ДТП и скорости всех автомобилей не получены.',
+ limits=t['limits']+access['method']['limits']+['Для четырёх приоритетных скоростных карточек дополнительно показана чувствительность к независимому пересэмплированию дней и ID машин (постоянный вес ID между днями). Для интервалов ДИ условны по дням: зависимость одной машины между разными днями полностью не устранена; паспортный график и натурное наблюдение необходимы.',
+  'Число OSM-объектов не равно числу учреждений: территории и корпуса могут дублироваться. Население по зданиям, рабочие места, пассажиропотоки, ДТП и скорости всех автомобилей не получены.',
   f'Недельное сравнение использует {len(slots)} одинаковых пар маршрут×час с ≥90% окон и ≥3 наблюдаемыми машинами в каждом из 20 дней; наблюдаемый машино-час не равен полному выпуску. Первая неделя содержит 4 будних дня.',
   'Перенос/добавление остановки, новый переход, свет, навес и посадочная площадка представлены вариантами после обследования. По GPS не заявляется их отсутствие или необходимость строительства. Количественный эффект мер не оценён.']
  findings=[f"{audit_summary['rawRows']:,} исходных строк проверены; поле speed во всех них равно 1. Типичный шаг 61–62 с; скорость рассчитана независимо.",
@@ -151,7 +162,7 @@ def main():
   f"Из {access['summary']['stops']} наземных остановок привязаны к явной сети {access['summary']['snappedStops']}; для {access['summary']['stops']-access['summary']['snappedStops']} привязки нет. Это недостаток сведений, не доказанная недоступность."]
  ranking='Оценка = 20 × (0,25×польза + 0,25×безопасность + 0,20×доступность + 0,15×реализуемость + 0,15×доказательства). Каждый критерий 1–5, это экспертный приоритет обследования, не расчёт окупаемости. Польза: 1 — единичный объект, 3 — локальная связь, 4 — повторяемая проблема или много объектов, 5 — подтверждённый массовый спрос (не установлен). Безопасность: 2 — регулярность, 3 — задержки, 4 — связь через дорогу, 5 — детский/уязвимый объект; риск ДТП этим баллом не измерен. Доступность: 3 — общий путь, 4 — детские/пешеходные связи, 5 — непрерывность МГН. Реализуемость: 3 — требуется согласование, 4 — первичное обследование/оперативная проверка. Доказательства: 1 — разрыв OSM, 2 — модельная гипотеза, 4 — повторяемое GPS-наблюдение с ДИ; 5 требует независимой полевой проверки. Веса выбраны экспертно; карточки содержат все баллы, равные оценки сохраняют порядок формирования.'
  report={'version':1,'asOf':'2026-10-09','bounds':BOUNDS,'auditSummary':audit_summary,'archive':a['archive'],
-  'days':[{k:d[k] for k in ['date','hours','vehicles','routes','points','start','end']} for d in a['days']],
+  'days':[{**{k:d[k] for k in ['date','hours','vehicles','routes','points','start','end']},'coverageByRoute':{route:[round(next((rh['coverage'] for rh in d['routeHours'] if rh['route']==route and rh['hour']==h),0),3) for h in range(24)] for route in sorted({rh['route'] for rh in d['routeHours']})}} for d in a['days']],
   'selection':t['selection'],'sources':SOURCES,'findings':findings,'candidates':candidates,'segments':table,'intervals':interval_table,'accessSummary':access['summary'],
   'comparison':comparisons,'matchedRouteHourSlots':sorted(slots),'territory':[{'lon':center(*c)[0],'lat':center(*c)[1],'days':n} for c,n in territory.items()],
   'weights':WEIGHTS,'ratingLabels':LABELS,'rankingMethod':ranking,'limits':limits}

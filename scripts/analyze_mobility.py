@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from prepare_transport import decode, distance, bearing, StopIndex
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]; RAW=ROOT/'raw'; OUT=ROOT/'dist/data/mobility'
-OUT.mkdir(parents=True,exist_ok=True); CACHE=RAW/'mobility';CACHE.mkdir(exist_ok=True)
+OUT.mkdir(parents=True,exist_ok=True); CACHE=RAW/'mobility';CACHE.mkdir(parents=True,exist_ok=True)
 BOUNDS=json.loads((ROOT/'dist/data/terrain.json').read_text())['bounds']
 STOPS=json.loads((ROOT/'dist/data/transport/stops.json').read_text())['stops']
 INDEX=StopIndex(STOPS,BOUNDS); MX=111320*math.cos(math.radians((BOUNDS[1]+BOUNDS[3])/2))
@@ -36,6 +36,24 @@ def cluster_ci(groups,fn,seed=20261009):
     if len(groups)<5:return None
     rng=random.Random(seed); draws=[fn([x for g in rng.choices(groups,k=len(groups)) for x in g]) for _ in range(300)]
     return [rounded(quantile(draws,.025)),rounded(quantile(draws,.975))]
+def crossed_speed_ci(rows,seed=20261009):
+    """Sensitivity for ratio-of-totals: independently resample days and vehicle IDs.
+    Pigeonhole bootstrap keeps a vehicle's records together across days. Not an
+    exact confidence procedure for this nonlinear ratio or tracking bias.
+    rows: (day, vehicle, seconds, metres), already selected by audit rules.
+    """
+    totals=defaultdict(lambda:[0,0])
+    for day,vid,seconds,meters in rows:
+        totals[(day,vid)][0]+=seconds;totals[(day,vid)][1]+=meters
+    days=sorted({d for d,v in totals});vehicles=sorted({v for d,v in totals})
+    if len(days)<5 or len(vehicles)<5:return None
+    rng=random.Random(seed);draws=[]
+    for _ in range(300):
+        dw=Counter(rng.choices(days,k=len(days)));vw=Counter(rng.choices(vehicles,k=len(vehicles)));seconds=meters=0
+        for (day,vid),(s,m) in totals.items():
+            w=dw[day]*vw[vid];seconds+=w*s;meters+=w*m
+        if seconds:draws.append(meters/seconds*3.6)
+    return [rounded(quantile(draws,.025)),rounded(quantile(draws,.975))] if len(draws)>=250 else None
 def timestamp(s):
     # Verified d.m.Y format, no locale or host timezone dependency.
     return int(dt.datetime(int(s[6:10]),int(s[3:5]),int(s[:2]),int(s[11:13]),int(s[14:16]),int(s[17:19]),tzinfo=MOSCOW).timestamp())
@@ -206,7 +224,7 @@ def export_csv(name,rows,keys=None):
     if not rows:return
     keys=keys or list(rows[0]);p=OUT/(name+'.csv')
     with p.open('w',encoding='utf-8-sig',newline='') as f:
-        w=csv.DictWriter(f,fieldnames=keys,extrasaction='ignore',delimiter=';');w.writeheader()
+        w=csv.DictWriter(f,fieldnames=keys,extrasaction='ignore',delimiter=';',lineterminator='\n');w.writeheader()
         for row in rows:w.writerow({k:json.dumps(row[k],ensure_ascii=False) if isinstance(row.get(k),(list,dict)) else row.get(k) for k in keys})
 
 if __name__=='__main__':

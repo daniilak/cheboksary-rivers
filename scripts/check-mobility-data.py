@@ -10,6 +10,8 @@ assert abs(distance((47.25,56.125),(47.25,56.126))-111.195)<.01
 z=m.stats([10,30]);assert z['median']==20 and z['p90']==28 and z['cv']==.5 and z['wait']==12.5
 assert m.cluster_ci([[10]]*4,lambda x:sum(x)/len(x)) is None
 assert m.cluster_ci([[10]]*5,lambda x:sum(x)/len(x))==[10,10]
+assert m.crossed_speed_ci([(str(d),str(v),60,100) for d in range(6) for v in range(7)])==[6,6]
+assert m.crossed_speed_ci([('one','one',60,100)]) is None
 old_raw=m.RAW
 with tempfile.TemporaryDirectory() as tmp:
     m.RAW=pathlib.Path(tmp);date='2026-10-09';p=m.RAW/('transport-'+date+'.csv')
