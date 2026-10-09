@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {TransportView} from './transport-view.js?v=2';
+import {TransportView} from './transport-view.js?v=mobility-1';
 import {DemandFrames} from './frame-policy.js';
 import {TerrainEvolution} from './erosion.js';
 import {HydrologyView} from './hydrology-view.js?v=performance-2';

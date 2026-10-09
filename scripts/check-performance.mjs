@@ -62,7 +62,8 @@ try{
 const elements=new Map(),element=id=>{if(!elements.has(id))elements.set(id,{value:'',disabled:false,textContent:'',setAttribute(){}});return elements.get(id);};
 global.document={getElementById:element,createElement:()=>({width:32,height:32,getContext:()=>({beginPath(){},arc(){},fill(){}})})};global.window={addEventListener(){}};
 global.Worker=class{constructor(){this.messages=[];}postMessage(v){this.messages.push(v);}terminate(){}};
-let viewSource=fs.readFileSync(new URL('../dist/transport-view.js',import.meta.url),'utf8').replace("'three'",JSON.stringify(local('vendor/three.module.js'))).replace("'./transport-math.js?v=performance-3'",JSON.stringify(local('transport-math.js'))).replace("'./transport-replay.js'",JSON.stringify(local('transport-replay.js'))).replace("'./transport-buffers.js'",JSON.stringify(bufferModule)).replace("new URL('./transport-worker.js',import.meta.url)",JSON.stringify(local('transport-worker.js')));
+const mobilityModule=asModule(fs.readFileSync(new URL('../dist/mobility-view.js',import.meta.url),'utf8').replace("'three'",JSON.stringify(local('vendor/three.module.js'))));
+let viewSource=fs.readFileSync(new URL('../dist/transport-view.js',import.meta.url),'utf8').replace("'three'",JSON.stringify(local('vendor/three.module.js'))).replace("'./transport-math.js?v=performance-3'",JSON.stringify(local('transport-math.js'))).replace("'./transport-replay.js'",JSON.stringify(local('transport-replay.js'))).replace("'./transport-buffers.js'",JSON.stringify(bufferModule)).replace("'./mobility-view.js?v=1'",JSON.stringify(mobilityModule)).replace("new URL('./transport-worker.js',import.meta.url)",JSON.stringify(local('transport-worker.js')));
 const {TransportView}=await import(asModule(viewSource));
 const view=new TransportView({world:new THREE.Group(),onChange(){}});view.loadRequest=1;
 view.analyze(true);await new Promise(r=>setTimeout(r,5));assert.equal(view.worker.messages.length,1);

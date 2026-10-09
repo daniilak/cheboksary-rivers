@@ -30,6 +30,10 @@ jobs:
           node --check dist/transport-view.js
           node --check dist/transport-worker.js
           node --check dist/transport-import.js
+          node --check dist/mobility-view.js
+          node --check dist/mobility-worker.js
+          node scripts/check-mobility.mjs
+          python3 scripts/check-mobility-data.py
           node scripts/check-transport.mjs
           node scripts/check-performance.mjs
           node --check dist/hydrology-view.js

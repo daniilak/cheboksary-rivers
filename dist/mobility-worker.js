@@ -1,0 +1,8 @@
+import {adjacency,walkDistances,objectDistance,reachedEdges,allowed} from './mobility-math.js';
+let loading;
+async function load(){if(!loading)loading=Promise.all(['walk-graph.json','walk-objects.json'].map(async name=>{const r=await fetch('data/mobility/'+name);if(!r.ok)throw Error('HTTP '+r.status+' · '+name);return r.json();})).then(([graph,objects])=>({graph,objects,adj:adjacency(graph)})).catch(e=>{loading=null;throw e;});return loading;}
+self.onmessage=async ({data})=>{try{const {graph,objects,adj}=await load(),result=walkDistances(graph,adj,data),ranges=reachedEdges(graph,result),lines=new Float32Array(ranges.length*4),counts={},unknown={wheelchair:0,lighting:0,sharedRoad:0};let networkMeters=0;
+ ranges.forEach(([i,f,t],k)=>{const [a,b,l,flags]=graph.edges[i],p=graph.nodes[a],q=graph.nodes[b];lines.set([p[0]+(q[0]-p[0])*f,p[1]+(q[1]-p[1])*f,p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t],k*4);networkMeters+=(t-f)*l;if(flags&16)unknown.wheelchair++;if(flags&32)unknown.lighting++;if(flags&8)unknown.sharedRoad++;});
+ const reachable=[];let missing=0;for(const p of objects){if(!p.snap){missing++;continue;}const d=objectDistance(graph,result,p.snap);if(d<=result.budget){counts[p.category]=(counts[p.category]||0)+1;reachable.push({name:p.name,category:p.category,point:p.point,meters:Math.round(d)});}}
+ reachable.sort((a,b)=>b.meters-a.meters);self.postMessage({id:data.id,lines,counts,unknown,missing,networkMeters:Math.round(networkMeters),reachable:reachable.slice(0,25),budget:result.budget,connectedStarts:(data.stop===null?graph.stops:[graph.stops[data.stop]]).filter(ss=>ss&&allowed(graph.edges[ss.edge][3],data.limited)).length},[lines.buffer]);
+ }catch(e){self.postMessage({id:data.id,error:e.message});}};
