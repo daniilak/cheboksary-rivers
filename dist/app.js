@@ -88,7 +88,46 @@ function setExag(value){
   $('heightScaleNotice').textContent=value===1?'':'Высоты увеличены ×'+value;
 }
 function togglePlay(){if(state.mode==='hydrology'){hydrology.toggleSeason();return;}if(state.year>=200&&!state.evolving)setYear(0);state.evolving=!state.evolving;syncLab()}
-function wire(){ $('waterFocus').onclick=()=>{const sections=hydroData.sections;hydrology.onWaveFocus(sections[Math.floor(sections.length/2)].center,500);};for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{if($('info').open)$('info').close();setMode(b.dataset.mode);};rivers.forEach((r,i)=>{const b=document.createElement('button');b.className='river';b.dataset.river=i;const label=document.createElement('span');label.textContent=r.name;const length=document.createElement('small');length.textContent=fmt(r.length)+' км';b.append(label,length);b.onclick=()=>select(i);$('rivers').append(b)});$('all').dataset.river=-1;$('all').onclick=()=>select(-1);$('exag').oninput=e=>setExag(Number(e.target.value));$('flow').oninput=e=>{state.flow=Number(e.target.value);$('flowValue').textContent=state.flow.toFixed(1)+'×';applyEvolution()};$('sed').oninput=e=>{state.sed=Number(e.target.value);$('sedValue').textContent=state.sed.toFixed(1);applyEvolution()};$('year').oninput=e=>{state.evolving=false;setYear(Number(e.target.value))};$('play').onclick=togglePlay;$('experiment').onclick=()=>{state.evolving=false;state.compare=false;setYear(0)};$('compare').onclick=()=>{state.compare=!state.compare;syncLab();applyEvolution()};$('bend').onclick=focusBend;$('record').onclick=recordVideo;$('view3d').onclick=()=>setView(false);$('viewTop').onclick=()=>setView(true);$('reset').onclick=frame;for(const id of ['about','sources'])$(id).onclick=()=>$('info').showModal();$('closeInfo').onclick=()=>$('info').close();$('info').onclick=e=>{if(e.target===$('info')){const r=$('info').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('info').close()}};window.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','BUTTON','TEXTAREA','SELECT'].includes(e.target.tagName)&&!$('info').open){e.preventDefault();togglePlay()}});let down;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5||e.button!==0)return;const r=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(riverGroup.children).find(h=>h.object.userData.river!==undefined);if(transport?.pick(e,renderer.domElement))return;if(hydrology?.pick(ray))return;if(hit)select(hit.object.userData.river)});$('heightLegend').textContent=`${Math.round(meta.min)}–${Math.round(meta.max)}`}
+// Keep the map and its playback controls together; ResizeObserver updates the canvas.
+function wireFullscreen(){
+  const viewport=$('viewport'),button=$('mapFullscreen');
+  let pending=false;
+  const expanded=()=>document.fullscreenElement===viewport||viewport.classList.contains('map-expanded');
+  const sync=()=>{
+    const active=expanded();
+    document.body.classList.toggle('map-expanded',active);
+    button.textContent=active?'↙ Свернуть':'⛶ На весь экран';
+    button.setAttribute('aria-pressed',String(active));
+    button.setAttribute('aria-label',active?'Свернуть карту':'Развернуть карту на весь экран');
+    button.title=active?'Свернуть карту (Esc)':'Развернуть карту на весь экран';
+    resize();
+  };
+  const collapse=async()=>{
+    if(document.fullscreenElement===viewport)await document.exitFullscreen();
+    viewport.classList.remove('map-expanded');sync();button.focus({preventScroll:true});
+  };
+  button.onclick=async()=>{
+    if(pending)return;
+    pending=true;
+    try{
+      if(expanded())await collapse();
+      else{
+        // iOS and embedded browsers may not offer the Fullscreen API.
+        try{
+          if(!viewport.requestFullscreen||!document.fullscreenEnabled)throw new Error('Fullscreen unavailable');
+          await viewport.requestFullscreen();
+        }catch{viewport.classList.add('map-expanded');}
+        sync();
+      }
+    }finally{pending=false;}
+  };
+  document.addEventListener('fullscreenchange',sync);
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&viewport.classList.contains('map-expanded')){e.preventDefault();collapse();}
+  });
+  sync();
+}
+function wire(){ wireFullscreen(); $('waterFocus').onclick=()=>{const sections=hydroData.sections;hydrology.onWaveFocus(sections[Math.floor(sections.length/2)].center,500);};for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{if($('info').open)$('info').close();setMode(b.dataset.mode);};rivers.forEach((r,i)=>{const b=document.createElement('button');b.className='river';b.dataset.river=i;const label=document.createElement('span');label.textContent=r.name;const length=document.createElement('small');length.textContent=fmt(r.length)+' км';b.append(label,length);b.onclick=()=>select(i);$('rivers').append(b)});$('all').dataset.river=-1;$('all').onclick=()=>select(-1);$('exag').oninput=e=>setExag(Number(e.target.value));$('flow').oninput=e=>{state.flow=Number(e.target.value);$('flowValue').textContent=state.flow.toFixed(1)+'×';applyEvolution()};$('sed').oninput=e=>{state.sed=Number(e.target.value);$('sedValue').textContent=state.sed.toFixed(1);applyEvolution()};$('year').oninput=e=>{state.evolving=false;setYear(Number(e.target.value))};$('play').onclick=togglePlay;$('experiment').onclick=()=>{state.evolving=false;state.compare=false;setYear(0)};$('compare').onclick=()=>{state.compare=!state.compare;syncLab();applyEvolution()};$('bend').onclick=focusBend;$('record').onclick=recordVideo;$('view3d').onclick=()=>setView(false);$('viewTop').onclick=()=>setView(true);$('reset').onclick=frame;for(const id of ['about','sources'])$(id).onclick=()=>$('info').showModal();$('closeInfo').onclick=()=>$('info').close();$('info').onclick=e=>{if(e.target===$('info')){const r=$('info').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('info').close()}};window.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','BUTTON','TEXTAREA','SELECT'].includes(e.target.tagName)&&!$('info').open){e.preventDefault();togglePlay()}});let down;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5||e.button!==0)return;const r=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(riverGroup.children).find(h=>h.object.userData.river!==undefined);if(transport?.pick(e,renderer.domElement))return;if(hydrology?.pick(ray))return;if(hit)select(hit.object.userData.river)});$('heightLegend').textContent=`${Math.round(meta.min)}–${Math.round(meta.max)}`}
 // North is -z; with the camera east of target its screen projection points right.
 function compassRotation(x,z){return Math.atan2(x,z)}
 function setView(top){state.top=top;$('view3d').classList.toggle('active',!top);$('viewTop').classList.toggle('active',top);frame()}
